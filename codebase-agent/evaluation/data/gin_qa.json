@@ -1,0 +1,37 @@
+[
+  {
+    "id": "gin-001",
+    "question": "What is the main entry point of Gin?",
+    "ground_truth_answer": "The main entry point is the New() function in gin.go",
+    "source_file": "gin.go",
+    "source_lines": [30, 60]
+  },
+  {
+    "id": "gin-002",
+    "question": "How does Gin handle HTTP routes?",
+    "ground_truth_answer": "Routes are registered via the RouterGroup, which maps HTTP methods and paths to handler functions",
+    "source_file": "routergroup.go",
+    "source_lines": [20, 100]
+  },
+  {
+    "id": "gin-003",
+    "question": "What is the Context struct used for?",
+    "ground_truth_answer": "Context holds request and response data, and provides methods for rendering JSON/XML/HTML",
+    "source_file": "context.go",
+    "source_lines": [15, 50]
+  },
+  {
+    "id": "gin-004",
+    "question": "How does Gin's middleware chain work?",
+    "ground_truth_answer": "Middleware is stored as HandlerFunc chain in the Context, executed in FIFO order via Next()",
+    "source_file": "gin.go",
+    "source_lines": [100, 200]
+  },
+  {
+    "id": "gin-005",
+    "question": "What types of HTTP response formats does Gin support?",
+    "ground_truth_answer": "Gin supports JSON, XML, YAML, Protobuf, Msgpack, and HTML rendering",
+    "source_file": "render/",
+    "source_lines": [1, 50]
+  }
+]

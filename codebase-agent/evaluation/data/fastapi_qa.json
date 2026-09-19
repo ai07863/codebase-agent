@@ -1,0 +1,37 @@
+[
+  {
+    "id": "fastapi-001",
+    "question": "How does FastAPI handle dependency injection?",
+    "ground_truth_answer": "FastAPI uses Depends() to declare dependencies, which are resolved at runtime from the dependency graph",
+    "source_file": "fastapi/dependencies/utils.py",
+    "source_lines": [50, 150]
+  },
+  {
+    "id": "fastapi-002",
+    "question": "What is the purpose of the APIRouter class?",
+    "ground_truth_answer": "APIRouter allows grouping routes under a prefix with shared dependencies, tags, and middleware",
+    "source_file": "fastapi/routing.py",
+    "source_lines": [100, 200]
+  },
+  {
+    "id": "fastapi-003",
+    "question": "How does FastAPI generate OpenAPI specs?",
+    "ground_truth_answer": "FastAPI introspects route handlers' type annotations to auto-generate OpenAPI schema via openapi.py",
+    "source_file": "fastapi/openapi/utils.py",
+    "source_lines": [1, 100]
+  },
+  {
+    "id": "fastapi-004",
+    "question": "What is the request validation mechanism?",
+    "ground_truth_answer": "Request validation uses Pydantic models, converting JSON body to Python objects with type checking",
+    "source_file": "fastapi/routing.py",
+    "source_lines": [200, 300]
+  },
+  {
+    "id": "fastapi-005",
+    "question": "How does FastAPI handle WebSocket connections?",
+    "ground_truth_answer": "WebSocket is handled via the WebSocket class, with methods like accept(), receive_text(), send_text()",
+    "source_file": "fastapi/websockets.py",
+    "source_lines": [1, 60]
+  }
+]

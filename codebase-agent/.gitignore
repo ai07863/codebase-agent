@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 .env
 data/
+!evaluation/data/
 chroma/
 *.egg-info/
 dist/
