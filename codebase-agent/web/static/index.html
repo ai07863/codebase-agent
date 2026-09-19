@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CodeBase Agent</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; color: #333; }
+header { background: #1a1a2e; color: #fff; padding: 16px 24px; display: flex; align-items: center; gap: 12px; }
+header h1 { font-size: 20px; font-weight: 600; }
+header span { font-size: 12px; color: #888; }
+.container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+.card { background: #fff; border-radius: 8px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.card h2 { font-size: 16px; margin-bottom: 12px; color: #1a1a2e; }
+.row { display: flex; gap: 16px; flex-wrap: wrap; }
+.col { flex: 1; min-width: 300px; }
+input[type="text"], textarea { width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; margin-bottom: 8px; }
+textarea { font-family: monospace; font-size: 13px; resize: vertical; min-height: 80px; }
+button { padding: 10px 20px; background: #1a1a2e; color: #fff; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; }
+button:hover { background: #16213e; }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-sm { padding: 6px 12px; font-size: 12px; }
+.btn-danger { background: #e74c3c; }
+.btn-danger:hover { background: #c0392b; }
+.repo-list { list-style: none; }
+.repo-list li { padding: 8px 12px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
+.repo-list li:last-child { border: none; }
+.repo-name { font-weight: 500; }
+.repo-count { color: #888; font-size: 13px; }
+.chat-box { border: 1px solid #ddd; border-radius: 6px; height: 300px; overflow-y: auto; padding: 12px; margin-bottom: 8px; background: #fafafa; }
+.chat-msg { margin-bottom: 8px; padding: 8px 12px; border-radius: 6px; max-width: 85%; }
+.chat-q { background: #e3f2fd; margin-right: auto; }
+.chat-a { background: #f3e5f5; margin-left: auto; white-space: pre-wrap; font-size: 13px; }
+.chat-a code { background: #eee; padding: 1px 4px; border-radius: 3px; font-size: 12px; }
+.chat-input-row { display: flex; gap: 8px; }
+.chat-input-row input { flex: 1; margin: 0; }
+.loading { opacity: 0.6; pointer-events: none; }
+.status-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; }
+.status-ok { background: #e8f5e9; color: #2e7d32; }
+pre { background: #f5f5f5; padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 13px; }
+.tab-bar { display: flex; gap: 4px; margin-bottom: 16px; }
+.tab-btn { padding: 8px 16px; border: 1px solid #ddd; background: #fff; border-radius: 6px 6px 0 0; cursor: pointer; font-size: 13px; }
+.tab-btn.active { background: #1a1a2e; color: #fff; border-color: #1a1a2e; }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+</style>
+</head>
+<body>
+<header>
+  <h1>CodeBase Agent</h1>
+  <span>代码库智能分析</span>
+</header>
+<div class="container">
+  <div class="tab-bar">
+    <button class="tab-btn active" onclick="switchTab('analyze')">分析仓库</button>
+    <button class="tab-btn" onclick="switchTab('qa')">问答</button>
+    <button class="tab-btn" onclick="switchTab('pr')">PR 分析</button>
+    <button class="tab-btn" onclick="switchTab('graph')">依赖图</button>
+  </div>
+
+  <div id="tab-analyze" class="tab-content active">
+    <div class="row">
+      <div class="col">
+        <div class="card">
+          <h2>分析新仓库</h2>
+          <input type="text" id="repoUrl" placeholder="https://github.com/gin-gonic/gin" value="https://github.com/gin-gonic/gin">
+          <button onclick="analyzeRepo()" id="analyzeBtn">分析</button>
+          <div id="analyzeResult" style="margin-top:8px"></div>
+        </div>
+      </div>
+      <div class="col">
+        <div class="card">
+          <h2>已分析仓库</h2>
+          <ul class="repo-list" id="repoList"><li style="color:#888">加载中...</li></ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="tab-qa" class="tab-content">
+    <div class="card">
+      <h2>代码问答</h2>
+      <select id="qaRepo" style="width:100%;padding:8px;margin-bottom:8px;border:1px solid #ddd;border-radius:6px"></select>
+      <div class="chat-box" id="chatBox">
+        <div class="chat-msg chat-a" style="margin-left:0;background:#f0f0f0">选择一个仓库并开始提问</div>
+      </div>
+      <div class="chat-input-row">
+        <input type="text" id="qaInput" placeholder="这个项目的路由是怎么组织的？" onkeydown="if(event.key==='Enter') askQuestion()">
+        <button onclick="askQuestion()">发送</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="tab-pr" class="tab-content">
+    <div class="card">
+      <h2>PR 变更分析</h2>
+      <input type="text" id="prUrl" placeholder="https://github.com/gin-gonic/gin/pull/1234">
+      <button onclick="analyzePR()" id="prBtn">分析 PR</button>
+      <div id="prResult" style="margin-top:8px"></div>
+    </div>
+  </div>
+
+  <div id="tab-graph" class="tab-content">
+    <div class="card">
+      <h2>调用关系图</h2>
+      <select id="graphRepo" style="width:100%;padding:8px;margin-bottom:8px;border:1px solid #ddd;border-radius:6px"></select>
+      <button onclick="loadGraph()">查看依赖图</button>
+      <div id="graphResult" style="margin-top:8px"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = window.location.origin;
+
+function switchTab(name) {
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  event.target.classList.add('active');
+}
+
+async function apiPost(path, body) {
+  const r = await fetch(API + path, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body)
+  });
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({detail: r.statusText}));
+    throw new Error(err.detail || r.statusText);
+  }
+  return r.json();
+}
+
+async function apiGet(path) {
+  const r = await fetch(API + path);
+  if (!r.ok) throw new Error(r.statusText);
+  return r.json();
+}
+
+async function analyzeRepo() {
+  const btn = document.getElementById('analyzeBtn');
+  const result = document.getElementById('analyzeResult');
+  btn.disabled = true;
+  btn.textContent = '分析中...';
+  result.innerHTML = '<span class="status-badge status-ok">克隆并解析中...</span>';
+  try {
+    const data = await apiPost('/repos/analyze', {repo_url: document.getElementById('repoUrl').value});
+    result.innerHTML = `<span class="status-badge status-ok">✅ ${data.repo_name}: ${data.nodes_count} 个函数/类已索引</span>`;
+    loadRepos();
+  } catch(e) {
+    result.innerHTML = `<span style="color:#e74c3c">❌ ${e.message}</span>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '分析';
+  }
+}
+
+async function loadRepos() {
+  try {
+    const repos = await apiGet('/repos');
+    const list = document.getElementById('repoList');
+    if (repos.length === 0) {
+      list.innerHTML = '<li style="color:#888">暂无分析过的仓库</li>';
+    } else {
+      list.innerHTML = repos.map(r => `<li><span class="repo-name">${r.name}</span><span class="repo-count">${r.nodes_count} 个节点</span></li>`).join('');
+    }
+    const sel1 = document.getElementById('qaRepo');
+    const sel2 = document.getElementById('graphRepo');
+    const opts = repos.map(r => `<option value="${r.name}">${r.name} (${r.nodes_count})</option>`).join('');
+    sel1.innerHTML = '<option value="">选择仓库...</option>' + opts;
+    sel2.innerHTML = '<option value="">选择仓库...</option>' + opts;
+  } catch(e) {
+    console.error(e);
+  }
+}
+
+async function askQuestion() {
+  const repo = document.getElementById('qaRepo').value;
+  const q = document.getElementById('qaInput').value;
+  if (!repo || !q) return;
+  const box = document.getElementById('chatBox');
+  box.innerHTML += `<div class="chat-msg chat-q">${q}</div>`;
+  document.getElementById('qaInput').value = '';
+  box.scrollTop = box.scrollHeight;
+  box.innerHTML += `<div class="chat-msg chat-a" style="color:#888">思考中...</div>`;
+  try {
+    const data = await apiPost(`/repos/${repo}/query`, {question: q});
+    const msgs = box.querySelectorAll('.chat-msg');
+    msgs[msgs.length - 1].outerHTML = `<div class="chat-msg chat-a">${data.answer.replace(/\n/g, '<br>')}</div>`;
+  } catch(e) {
+    const msgs = box.querySelectorAll('.chat-msg');
+    msgs[msgs.length - 1].outerHTML = `<div class="chat-msg chat-a" style="color:#e74c3c">错误: ${e.message}</div>`;
+  }
+  box.scrollTop = box.scrollHeight;
+}
+
+async function analyzePR() {
+  const btn = document.getElementById('prBtn');
+  const result = document.getElementById('prResult');
+  btn.disabled = true;
+  btn.textContent = '分析中...';
+  result.innerHTML = '<span class="status-badge status-ok">分析中...</span>';
+  try {
+    const data = await apiPost('/analysis/pr', {pr_url: document.getElementById('prUrl').value});
+    result.innerHTML = `<pre>${data.markdown_report}</pre>`;
+  } catch(e) {
+    result.innerHTML = `<span style="color:#e74c3c">❌ ${e.message}</span>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '分析 PR';
+  }
+}
+
+async function loadGraph() {
+  const repo = document.getElementById('graphRepo').value;
+  const result = document.getElementById('graphResult');
+  if (!repo) return;
+  try {
+    const data = await apiGet(`/repos/${repo}/graph`);
+    result.innerHTML = `<pre>${data.mermaid}</pre>`;
+  } catch(e) {
+    result.innerHTML = `<span style="color:#e74c3c">❌ ${e.message}</span>`;
+  }
+}
+
+loadRepos();
+</script>
+</body>
+</html>

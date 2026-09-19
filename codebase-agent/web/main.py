@@ -5,6 +5,7 @@ from threading import Lock
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from config.settings import Settings
 from code_parser.ast_parser import parse_repo
 from code_parser.relationship import build_call_graph
@@ -33,6 +34,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="CodeBase Agent API", version="0.2.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.mount("/ui", StaticFiles(directory="web/static", html=True), name="static")
 
 
 def _ensure_repo(repo_name: str) -> Path:
