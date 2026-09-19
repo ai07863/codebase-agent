@@ -11,7 +11,10 @@ from embedding.embedder import Embedder
 from retrieval.vector_store import VectorStore
 from retrieval.ast_index import ASTIndex
 from agent.react_loop import process_query
-from web.models import AnalyzeRequest, AnalyzeResponse, QueryRequest, QueryResponse, RepoInfo
+from web.models import AnalyzeRequest, AnalyzeResponse, QueryRequest, QueryResponse, RepoInfo, PRRequest, PRResponse
+from analysis.report import generate_report
+from analysis.pr_diff import fetch_pr_diff, parse_github_url
+from analysis.impact import analyze_impact
 
 
 settings = Settings.load()
@@ -121,3 +124,22 @@ def get_graph(repo_name: str):
             mermaid_lines.append(f"    {caller}[{caller}] --> {callee}[{callee}]")
     mermaid_lines.append("```")
     return {"mermaid": "\n".join(mermaid_lines), "graph": graph}
+
+
+@app.post("/analysis/pr", response_model=PRResponse)
+def analyze_pr(req: PRRequest):
+    pr_info = parse_github_url(req.pr_url)
+    if not pr_info:
+        raise HTTPException(status_code=400, detail=f"Invalid PR URL: {req.pr_url}")
+
+    repo_name = pr_info.repo
+    repo_path = Path(settings.repos_dir) / repo_name
+    if not repo_path.exists():
+        cmd = ["git", "clone", "--depth", "1", f"https://github.com/{pr_info.owner}/{pr_info.repo}.git", str(repo_path)]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise HTTPException(status_code=400, detail=f"Clone of {repo_name} failed: {result.stderr}")
+
+    diff = fetch_pr_diff(req.pr_url, req.github_token)
+    report = generate_report(diff, str(repo_path))
+    return PRResponse(**report)

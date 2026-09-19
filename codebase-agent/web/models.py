@@ -29,3 +29,37 @@ class RepoInfo(BaseModel):
 
 class ErrorResponse(BaseModel):
     detail: str
+
+
+class PRRequest(BaseModel):
+    pr_url: str
+    github_token: str | None = None
+
+
+class FileBreakdown(BaseModel):
+    file: str
+    status: str
+    additions: int
+    deletions: int
+    affected_functions: list[str]
+    total_functions_in_file: int
+
+
+class PRStats(BaseModel):
+    files_changed: int
+    additions: int
+    deletions: int
+    functions_affected: int
+
+
+class PRResponse(BaseModel):
+    pr_number: int
+    title: str
+    repo: str
+    base_branch: str
+    head_branch: str
+    risk_score: str
+    stats: PRStats
+    files: list[FileBreakdown]
+    impacted_callers: dict[str, list[str]]
+    markdown_report: str
