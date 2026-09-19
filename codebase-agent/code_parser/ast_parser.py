@@ -76,7 +76,7 @@ def _traverse(node, source_bytes: bytes, file_path: str, inside_class: bool = Fa
             else:
                 node_type = "class"
             calls = _extract_calls(node, source_bytes)
-            node_id = f"{file_path}:{name}"
+            node_id = f"{file_path}:{name}:{start_line}"
             nodes.append(CodeNode(
                 node_id=node_id,
                 type=node_type,

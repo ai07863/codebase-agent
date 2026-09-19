@@ -53,7 +53,7 @@ def analyze(repo_url: str, branch: str | None):
 
     console.print("[green]正在构建搜索索引...[/]")
     embedder = Embedder()
-    vector_store = VectorStore(persist_dir=settings.chroma_persist_dir)
+    vector_store = VectorStore(repo_name=repo_name, persist_dir=settings.chroma_persist_dir)
     vector_store.add(nodes, embedder)
     ast_index = ASTIndex(nodes)
 

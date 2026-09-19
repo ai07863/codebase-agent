@@ -16,15 +16,16 @@ class SearchResult:
 
 
 class VectorStore:
-    def __init__(self, persist_dir: str = "./data/chroma"):
+    def __init__(self, repo_name: str = "default", persist_dir: str = "./data/chroma"):
         self.client = chromadb.PersistentClient(
             path=persist_dir,
             settings=ChromaSettings(anonymized_telemetry=False),
         )
         self.collection = self.client.get_or_create_collection(
-            name="code_nodes",
+            name=f"code_nodes_{repo_name}",
             metadata={"hnsw:space": "cosine"},
         )
+        self._repo_name = repo_name
 
     def add(self, nodes: list[CodeNode], embedder: Embedder):
         texts = [f"{n.signature}\n{n.docstring}" for n in nodes]

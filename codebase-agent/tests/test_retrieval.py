@@ -13,7 +13,7 @@ def test_vector_store_add_and_search():
                  start_line=5, end_line=7, signature="def add(a,b):", docstring="Add two numbers", calls=[]),
     ]
     embedder = Embedder()
-    vs = VectorStore()
+    vs = VectorStore(repo_name="test")
     vs.add(nodes, embedder)
     results = vs.search("add two numbers", embedder, k=2)
     assert len(results) > 0
@@ -26,6 +26,6 @@ def test_ast_index_lookup():
                  start_line=1, end_line=3, signature="def greet():", docstring="", calls=[]),
     ]
     idx = ASTIndex(nodes)
-    result = idx.lookup("greet")
+    result = idx.lookup_one("greet")
     assert result is not None
     assert result.name == "greet"

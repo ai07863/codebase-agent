@@ -1,6 +1,7 @@
 import subprocess
 import sys
 from pathlib import Path
+from threading import Lock
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,12 +15,13 @@ from agent.react_loop import process_query
 from web.models import AnalyzeRequest, AnalyzeResponse, QueryRequest, QueryResponse, RepoInfo, PRRequest, PRResponse
 from analysis.report import generate_report
 from analysis.pr_diff import fetch_pr_diff, parse_github_url
-from analysis.impact import analyze_impact
 
 
 settings = Settings.load()
 _embedder: Embedder | None = None
 _indexes: dict[str, tuple[VectorStore, ASTIndex]] = {}
+_index_lock = Lock()
+_cache: dict[str, tuple[list, dict]] = {}
 
 
 @asynccontextmanager
@@ -41,14 +43,25 @@ def _ensure_repo(repo_name: str) -> Path:
 
 
 def _load_indexes(repo_name: str):
-    if repo_name not in _indexes:
-        repo_path = _ensure_repo(repo_name)
-        nodes = parse_repo(str(repo_path))
-        vector_store = VectorStore(persist_dir=settings.chroma_persist_dir)
-        vector_store.add(nodes, _embedder)
-        ast_index = ASTIndex(nodes)
-        _indexes[repo_name] = (vector_store, ast_index)
-    return _indexes[repo_name]
+    with _index_lock:
+        if repo_name not in _indexes:
+            repo_path = _ensure_repo(repo_name)
+            nodes = parse_repo(str(repo_path))
+            vector_store = VectorStore(repo_name=repo_name, persist_dir=settings.chroma_persist_dir)
+            vector_store.add(nodes, _embedder)
+            ast_index = ASTIndex(nodes)
+            _indexes[repo_name] = (vector_store, ast_index)
+            _cache[repo_name] = (nodes, build_call_graph(nodes))
+        return _indexes[repo_name]
+
+
+def _get_cached(repo_name: str):
+    with _index_lock:
+        if repo_name not in _cache:
+            repo_path = _ensure_repo(repo_name)
+            nodes = parse_repo(str(repo_path))
+            _cache[repo_name] = (nodes, build_call_graph(nodes))
+        return _cache[repo_name]
 
 
 @app.get("/health")
@@ -75,10 +88,12 @@ def analyze_repo(req: AnalyzeRequest):
             raise HTTPException(status_code=400, detail=f"Clone failed: {result.stderr}")
 
     nodes = parse_repo(str(repo_path))
-    vector_store = VectorStore(persist_dir=settings.chroma_persist_dir)
+    vector_store = VectorStore(repo_name=repo_name, persist_dir=settings.chroma_persist_dir)
     vector_store.add(nodes, _embedder)
     ast_index = ASTIndex(nodes)
-    _indexes[repo_name] = (vector_store, ast_index)
+    with _index_lock:
+        _indexes[repo_name] = (vector_store, ast_index)
+        _cache[repo_name] = (nodes, build_call_graph(nodes))
 
     return AnalyzeResponse(repo_name=repo_name, nodes_count=len(nodes), status="analyzed")
 
@@ -91,7 +106,7 @@ def list_repos():
     results = []
     for d in repos_dir.iterdir():
         if d.is_dir():
-            nodes = parse_repo(str(d))
+            nodes, _ = _get_cached(d.name)
             results.append(RepoInfo(name=d.name, analyzed=True, nodes_count=len(nodes)))
     return results
 
@@ -101,7 +116,7 @@ def repo_status(repo_name: str):
     repo_path = Path(settings.repos_dir) / repo_name
     if not repo_path.exists():
         return RepoInfo(name=repo_name, analyzed=False)
-    nodes = parse_repo(str(repo_path))
+    nodes, _ = _get_cached(repo_name)
     return RepoInfo(name=repo_name, analyzed=True, nodes_count=len(nodes))
 
 
@@ -115,9 +130,8 @@ def query_repo(repo_name: str, req: QueryRequest):
 
 @app.get("/repos/{repo_name}/graph")
 def get_graph(repo_name: str):
-    repo_path = _ensure_repo(repo_name)
-    nodes = parse_repo(str(repo_path))
-    graph = build_call_graph(nodes)
+    _ensure_repo(repo_name)
+    nodes, graph = _get_cached(repo_name)
     mermaid_lines = ["```mermaid", "graph TD"]
     for caller, callees in graph.items():
         for callee in callees:

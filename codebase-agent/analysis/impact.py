@@ -1,18 +1,54 @@
-from pathlib import Path
+import re
 from code_parser.ast_parser import CodeNode, parse_repo
-from code_parser.relationship import find_callers, build_call_graph
+from code_parser.relationship import find_callers
 from analysis.pr_diff import ChangedFile, PRDiff
+
+
+def _extract_changed_lines(files: list[ChangedFile]) -> dict[str, set[int]]:
+    changed_lines: dict[str, set[int]] = {}
+    for f in files:
+        lines = set()
+        for line in f.patch.split("\n"):
+            m = re.match(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))?", line)
+            if m:
+                start = int(m.group(1))
+                count = int(m.group(2)) if m.group(2) else 1
+                for i in range(start, start + count):
+                    lines.add(i)
+        if lines:
+            changed_lines[f.path] = lines
+    return changed_lines
+
+
+def _find_changed_functions(files: list[ChangedFile], nodes: list[CodeNode]) -> list[str]:
+    changed_lines = _extract_changed_lines(files)
+    if not changed_lines:
+        return []
+
+    changed = set()
+    for node in nodes:
+        file_lines = changed_lines.get(node.file_path)
+        if file_lines:
+            func_lines = set(range(node.start_line, node.end_line + 1))
+            if func_lines & file_lines:
+                changed.add(node.name)
+    return list(changed)
+
+
+def _calculate_risk(changed_functions: list[str], impacted: dict) -> str:
+    if not changed_functions:
+        return "none"
+
+    total_callers = sum(len(v) for v in impacted.values())
+    if total_callers > 15 or len(changed_functions) > 8:
+        return "high"
+    elif total_callers > 3 or len(changed_functions) > 2:
+        return "medium"
+    return "low"
 
 
 def analyze_impact(diff: PRDiff, repo_path: str) -> dict:
     nodes = parse_repo(repo_path)
-    call_graph = build_call_graph(nodes)
-    caller_cache = {}
-    for node in nodes:
-        callers = find_callers(nodes, node.name)
-        if callers:
-            caller_cache[node.name] = callers
-
     changed_functions = _find_changed_functions(diff.files, nodes)
 
     impacted = {}
@@ -40,31 +76,5 @@ def analyze_impact(diff: PRDiff, repo_path: str) -> dict:
         "changed_functions": changed_functions,
         "impacted_callers": impacted,
         "file_breakdown": file_breakdown,
-        "risk_score": _calculate_risk(changed_functions, impacted, nodes),
+        "risk_score": _calculate_risk(changed_functions, impacted),
     }
-
-
-def _find_changed_functions(files: list[ChangedFile], nodes: list[CodeNode]) -> list[str]:
-    changed = []
-    for f in files:
-        for node in nodes:
-            if node.file_path == f.path:
-                changed.append(node.name)
-    return list(set(changed))
-
-
-def _calculate_risk(changed_functions: list[str], impacted: dict, nodes: list[CodeNode]) -> str:
-    if not changed_functions:
-        return "none"
-
-    total_callers = sum(len(v) for v in impacted.values())
-    node_map = {n.name: n for n in nodes}
-    func_complexity = sum(len(node_map.get(f, CodeNode(node_id="", type="", name="",
-        file_path="", start_line=0, end_line=0, signature="", docstring="")))
-        .signature for f in changed_functions)
-
-    if total_callers > 20 or len(changed_functions) > 10 or func_complexity > 500:
-        return "high"
-    elif total_callers > 5 or len(changed_functions) > 3:
-        return "medium"
-    return "low"

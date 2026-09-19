@@ -94,10 +94,10 @@ def _parse_diff(raw_diff: str) -> list[ChangedFile]:
             for part in parts:
                 if part.startswith("+"):
                     counts = part[1:].split(",")
-                    additions += int(counts[0])
+                    additions += int(counts[1]) if len(counts) > 1 else 1
                 elif part.startswith("-"):
                     counts = part[1:].split(",")
-                    deletions += int(counts[0])
+                    deletions += int(counts[1]) if len(counts) > 1 else 1
 
         if current_file:
             current_patch.append(line)

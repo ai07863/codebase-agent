@@ -1,4 +1,3 @@
-import json
 from openai import OpenAI
 from config.settings import Settings
 from retrieval.vector_store import VectorStore
@@ -28,36 +27,40 @@ Always cite your sources (file paths and line numbers)."""
 
 def process_query(query: str, repo_path: str, vector_store: VectorStore,
                   ast_index: ASTIndex, embedder: Embedder, settings: Settings) -> str:
+    repo_name = repo_path.rstrip("/\\").split("/")[-1].split("\\")[-1]
+    cache_key = f"qa:{repo_name}:{query}"
+
     cache = Cache(host=settings.redis_host, port=settings.redis_port)
-    cache_key = f"qa:{query}"
-    cached = cache.get(cache_key)
-    if cached:
-        return cached
+    try:
+        cached = cache.get(cache_key)
+        if cached:
+            return cached
 
-    client = OpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url)
-    route = classify_query(query)
+        client = OpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url)
+        route = classify_query(query)
 
-    messages = [
-        {"role": "system", "content": _SYSTEM_PROMPT},
-        {"role": "user", "content": query},
-    ]
+        messages = [
+            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "user", "content": query},
+        ]
 
-    if route == "exact":
-        ast_result = ast_search_tool(query, ast_index)
-        messages.append({"role": "assistant", "content": f"I looked up '{query}' in the AST index:\n{ast_result}"})
-    else:
-        sem_result = semantic_search_tool(query, vector_store, embedder)
-        messages.append({"role": "assistant", "content": f"I searched semantically for '{query}':\n{sem_result}"})
+        if route == "exact":
+            ast_result = ast_search_tool(query, ast_index)
+            messages.append({"role": "assistant", "content": f"I looked up '{query}' in the AST index:\n{ast_result}"})
+        else:
+            sem_result = semantic_search_tool(query, vector_store, embedder)
+            messages.append({"role": "assistant", "content": f"I searched semantically for '{query}':\n{sem_result}"})
 
-    messages.append({"role": "user", "content": "Based on the above information, provide a complete answer. Include file paths and line numbers."})
+        messages.append({"role": "user", "content": "Based on the above information, provide a complete answer. Include file paths and line numbers."})
 
-    response = client.chat.completions.create(
-        model=settings.llm_model,
-        messages=messages,
-        temperature=0.3,
-    )
+        response = client.chat.completions.create(
+            model=settings.llm_model,
+            messages=messages,
+            temperature=0.3,
+        )
 
-    answer = response.choices[0].message.content
-    cache.set(cache_key, answer, ttl=86400)
-    cache.close()
-    return answer
+        answer = response.choices[0].message.content
+        cache.set(cache_key, answer, ttl=86400)
+        return answer
+    finally:
+        cache.close()

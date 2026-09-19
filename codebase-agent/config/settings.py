@@ -8,7 +8,7 @@ class Settings:
     llm_model: str = field(default_factory=lambda: os.getenv("LLM_MODEL", "gpt-4o-mini"))
     llm_base_url: str = field(default_factory=lambda: os.getenv("LLM_BASE_URL", "https://api.openai.com/v1"))
     redis_host: str = field(default_factory=lambda: os.getenv("REDIS_HOST", "localhost"))
-    redis_port: int = int(os.getenv("REDIS_PORT", "6379"))
+    redis_port: int = field(default_factory=lambda: int(os.getenv("REDIS_PORT", "6379")))
     chroma_persist_dir: str = field(default_factory=lambda: os.getenv("CHROMA_PERSIST_DIR", "./data/chroma"))
     repos_dir: str = field(default_factory=lambda: os.getenv("REPOS_DIR", "./data/repos"))
 
