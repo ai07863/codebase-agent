@@ -20,4 +20,4 @@ dependencies = [
 codebase-agent = "cli.main:cli"
 
 [tool.setuptools.packages.find]
-include = ["codebase_agent", "codebase_agent.*", "config", "config.*", "cli", "cli.*", "code_parser", "code_parser.*", "embedding", "embedding.*", "retrieval", "retrieval.*", "tests", "tests.*"]
+include = ["codebase_agent", "codebase_agent.*", "config", "config.*", "cli", "cli.*", "code_parser", "code_parser.*", "embedding", "embedding.*", "retrieval", "retrieval.*", "cache", "cache.*", "tests", "tests.*"]
