@@ -25,7 +25,7 @@ def _get_parser(language: str = "python"):
         if language == "python":
             lang = Language(tspython.language())
         else:
-            raise ValueError(f"不支持的语言: {language}")
+            return None
         parser = Parser(lang)
         _PARSER_CACHE[language] = parser
     return _PARSER_CACHE[language]
@@ -60,7 +60,7 @@ def _extract_calls(node, source_bytes: bytes) -> list[str]:
     return calls
 
 
-def _traverse(node, source_bytes: bytes, file_path: str) -> list[CodeNode]:
+def _traverse(node, source_bytes: bytes, file_path: str, inside_class: bool = False) -> list[CodeNode]:
     nodes = []
     if node.type in ("function_definition", "class_definition"):
         name_node = node.child_by_field_name("name")
@@ -71,7 +71,10 @@ def _traverse(node, source_bytes: bytes, file_path: str) -> list[CodeNode]:
             sig_bytes = source_bytes[node.start_byte:node.end_byte]
             sig = sig_bytes.decode("utf-8").split("\n")[0].strip()
             docstring = _extract_docstring(node, source_bytes)
-            node_type = "function" if node.type == "function_definition" else "class"
+            if node.type == "function_definition":
+                node_type = "method" if inside_class else "function"
+            else:
+                node_type = "class"
             calls = _extract_calls(node, source_bytes)
             node_id = f"{file_path}:{name}"
             nodes.append(CodeNode(
@@ -89,10 +92,10 @@ def _traverse(node, source_bytes: bytes, file_path: str) -> list[CodeNode]:
                 body = node.child_by_field_name("body")
                 if body:
                     for child in body.children:
-                        nodes.extend(_traverse(child, source_bytes, file_path))
+                        nodes.extend(_traverse(child, source_bytes, file_path, inside_class=True))
     else:
         for child in node.children:
-            nodes.extend(_traverse(child, source_bytes, file_path))
+            nodes.extend(_traverse(child, source_bytes, file_path, inside_class))
     return nodes
 
 
@@ -107,6 +110,8 @@ def parse_repo(repo_path: str) -> list[CodeNode]:
             rel_path = str(file_path.relative_to(root))
             source_bytes = file_path.read_bytes()
             parser = _get_parser(lang)
+            if parser is None:
+                continue
             tree = parser.parse(source_bytes)
             nodes.extend(_traverse(tree.root_node, source_bytes, rel_path))
     return nodes
