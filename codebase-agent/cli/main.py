@@ -1,4 +1,3 @@
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -7,12 +6,10 @@ from rich.console import Console
 from rich.markdown import Markdown
 from config.settings import Settings
 from code_parser.ast_parser import parse_repo
-from code_parser.chunker import chunk_text
 from code_parser.relationship import build_call_graph
 from embedding.embedder import Embedder
 from retrieval.vector_store import VectorStore
 from retrieval.ast_index import ASTIndex
-from retrieval.hybrid_search import hybrid_search
 from agent.react_loop import process_query
 
 
