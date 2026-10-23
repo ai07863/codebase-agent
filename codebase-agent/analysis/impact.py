@@ -23,7 +23,8 @@ def _extract_changed_lines(files: list[ChangedFile]) -> dict[str, set[int]]:
                 lines.add(new_line_no)
                 new_line_no += 1
             elif line.startswith("-"):
-                continue
+                if new_line_no:
+                    lines.add(new_line_no)
             elif line.startswith(" "):
                 new_line_no += 1
         if lines:

@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 class Settings:
     llm_api_key: str = field(default_factory=lambda: os.getenv("LLM_API_KEY", ""))
     llm_model: str = field(default_factory=lambda: os.getenv("LLM_MODEL", "gpt-4o-mini"))
+    embedding_model: str = field(default_factory=lambda: os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5"))
     llm_base_url: str = field(default_factory=lambda: os.getenv("LLM_BASE_URL", "https://api.openai.com/v1"))
     redis_host: str = field(default_factory=lambda: os.getenv("REDIS_HOST", "localhost"))
     redis_port: int = field(default_factory=lambda: int(os.getenv("REDIS_PORT", "6379")))

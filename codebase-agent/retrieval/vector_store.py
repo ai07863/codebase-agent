@@ -7,6 +7,8 @@ from embedding.embedder import Embedder
 
 
 _EMBED_MAX_CHARS = 2000
+_CHUNK_CHARS = 1200
+_CHUNK_OVERLAP = 200
 
 
 def _node_text(node: CodeNode) -> str:
@@ -14,8 +16,21 @@ def _node_text(node: CodeNode) -> str:
     return "\n".join(p for p in parts if p)[:_EMBED_MAX_CHARS]
 
 
-def _node_hash(node: CodeNode) -> str:
-    return hashlib.md5(_node_text(node).encode("utf-8")).hexdigest()
+def _node_full_text(node: CodeNode) -> str:
+    parts = [node.name, node.signature, node.docstring, node.body]
+    return "\n".join(p for p in parts if p)
+
+
+def _chunk_text(text: str, size: int = _CHUNK_CHARS, overlap: int = _CHUNK_OVERLAP) -> list[str]:
+    if len(text) <= size:
+        return [text]
+    step = max(1, size - overlap)
+    chunks = [text[i:i + size] for i in range(0, len(text), step)]
+    return chunks
+
+
+def _chunk_hash(model_name: str, text: str) -> str:
+    return hashlib.md5(f"{model_name}\0{text}".encode("utf-8")).hexdigest()
 
 
 @dataclass
@@ -52,11 +67,17 @@ class VectorStore:
         self._repo_name = repo_name
 
     def add(self, nodes: list[CodeNode], embedder: Embedder):
-        """Incremental: only embed nodes that are new or whose content changed."""
+        """Chunk long nodes; incrementally embed only new/changed chunks."""
         if not nodes:
             return
-        ids = [n.node_id for n in nodes]
-        hashes = {n.node_id: _node_hash(n) for n in nodes}
+        model_name = getattr(embedder, "model_name", "")
+        entries = []  # (chunk_id, node, chunk_text)
+        for node in nodes:
+            for index, chunk in enumerate(_chunk_text(_node_full_text(node))):
+                entries.append((f"{node.node_id}#{index}", node, chunk))
+
+        ids = [entry[0] for entry in entries]
+        hashes = {cid: _chunk_hash(model_name, chunk) for cid, _node, chunk in entries}
 
         existing = self.collection.get(ids=ids, include=["metadatas"])
         existing_hash: dict[str, str | None] = {}
@@ -65,15 +86,16 @@ class VectorStore:
             meta = metas[i] if i < len(metas) else {}
             existing_hash[existing_id] = (meta or {}).get("hash")
 
-        to_embed = [n for n in nodes if existing_hash.get(n.node_id) != hashes[n.node_id]]
+        to_embed = [entry for entry in entries if existing_hash.get(entry[0]) != hashes[entry[0]]]
         if to_embed:
-            vectors = embedder.encode([_node_text(n) for n in to_embed])
+            vectors = embedder.encode([entry[2] for entry in to_embed])
             self.collection.upsert(
-                ids=[n.node_id for n in to_embed],
+                ids=[entry[0] for entry in to_embed],
                 embeddings=vectors,
-                metadatas=[{"type": n.type, "name": n.name, "file_path": n.file_path,
-                            "start_line": n.start_line, "end_line": n.end_line,
-                            "hash": hashes[n.node_id]} for n in to_embed],
+                metadatas=[{"type": entry[1].type, "name": entry[1].name,
+                            "file_path": entry[1].file_path, "start_line": entry[1].start_line,
+                            "end_line": entry[1].end_line, "node_id": entry[1].node_id,
+                            "hash": hashes[entry[0]]} for entry in to_embed],
             )
 
         keep = set(ids)
@@ -89,17 +111,22 @@ class VectorStore:
         if self.collection.count() == 0:
             return []
         query_vec = embedder.encode([query])
-        results = self.collection.query(query_embeddings=query_vec, n_results=k)
+        results = self.collection.query(query_embeddings=query_vec, n_results=max(k * 3, k))
         if not results["ids"] or not results["ids"][0]:
             return []
-        items = []
+        best: dict[str, SearchResult] = {}
         for i in range(len(results["ids"][0])):
-            items.append(SearchResult(
-                node_id=results["ids"][0][i],
-                name=results["metadatas"][0][i]["name"],
-                file_path=results["metadatas"][0][i]["file_path"],
-                start_line=results["metadatas"][0][i]["start_line"],
-                end_line=results["metadatas"][0][i]["end_line"],
-                score=results["distances"][0][i],
-            ))
-        return items
+            meta = results["metadatas"][0][i]
+            node_id = meta.get("node_id", results["ids"][0][i])
+            distance = results["distances"][0][i]
+            current = best.get(node_id)
+            if current is None or distance < current.score:
+                best[node_id] = SearchResult(
+                    node_id=node_id,
+                    name=meta["name"],
+                    file_path=meta["file_path"],
+                    start_line=meta["start_line"],
+                    end_line=meta["end_line"],
+                    score=distance,
+                )
+        return sorted(best.values(), key=lambda r: r.score)[:k]

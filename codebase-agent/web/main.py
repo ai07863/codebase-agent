@@ -43,8 +43,8 @@ _cache: dict[str, tuple[list, dict]] = {}
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _embedder
-    logger.info("正在加载 Embedding 模型 BAAI/bge-small-zh-v1.5（首次需下载 ~30MB）...")
-    _embedder = Embedder()
+    logger.info("正在加载 Embedding 模型 %s（首次需下载）...", settings.embedding_model)
+    _embedder = Embedder(settings.embedding_model)
     logger.info("模型加载完成，服务已就绪")
     yield
 
@@ -86,11 +86,21 @@ def _load_indexes(repo_name: str):
     with _index_lock:
         if repo_name in _indexes:
             return _indexes[repo_name]
-    # Heavy parse + embedding runs OUTSIDE the lock so other requests aren't blocked.
-    nodes, vector_store, ast_index = _load_nodes_and_index(repo_name)
+        cached = _cache.get(repo_name)
+    # Reuse nodes already parsed for the graph; only embed once, outside the lock.
+    if cached is not None:
+        nodes, graph = cached
+    else:
+        nodes = _parse_nodes(repo_name)
+        graph = build_call_graph(nodes)
+    if _embedder is None:
+        raise HTTPException(status_code=503, detail="Embedding model is still loading. Try again shortly.")
+    vector_store = VectorStore(repo_name=repo_name, persist_dir=settings.chroma_persist_dir)
+    vector_store.add(nodes, _embedder)
+    ast_index = ASTIndex(nodes)
     with _index_lock:
         _indexes.setdefault(repo_name, (vector_store, ast_index))
-        _cache.setdefault(repo_name, (nodes, build_call_graph(nodes)))
+        _cache.setdefault(repo_name, (nodes, graph))
         return _indexes[repo_name]
 
 
@@ -129,7 +139,7 @@ def analyze_repo(req: AnalyzeRequest):
         if req.branch:
             cmd.extend(["--branch", req.branch])
         cmd.extend([req.repo_url, str(repo_path)])
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
         if result.returncode != 0:
             raise HTTPException(status_code=400, detail=f"Clone failed: {result.stderr}")
 
@@ -240,6 +250,22 @@ def get_graph(repo_name: str):
     return data
 
 
+def _checkout_pr_head(repo_path: Path, pr_number: int) -> None:
+    """Fetch the PR head so diff line numbers match the parsed source."""
+    try:
+        fetch = subprocess.run(
+            ["git", "-C", str(repo_path), "fetch", "--depth", "1", "origin", f"pull/{pr_number}/head"],
+            capture_output=True, text=True, timeout=180,
+        )
+        if fetch.returncode == 0:
+            subprocess.run(["git", "-C", str(repo_path), "checkout", "-f", "FETCH_HEAD"],
+                           capture_output=True, text=True, timeout=60)
+        else:
+            logger.warning("fetch PR head failed: %s", fetch.stderr)
+    except Exception as exc:
+        logger.warning("checkout PR head failed: %s", exc)
+
+
 @app.post("/analysis/pr", response_model=PRResponse)
 def analyze_pr(req: PRRequest):
     pr_info = parse_github_url(req.pr_url)
@@ -250,9 +276,11 @@ def analyze_pr(req: PRRequest):
     repo_path = Path(settings.repos_dir) / repo_name
     if not repo_path.exists():
         cmd = ["git", "clone", "--depth", "1", f"https://github.com/{pr_info.owner}/{pr_info.repo}.git", str(repo_path)]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
         if result.returncode != 0:
             raise HTTPException(status_code=400, detail=f"Clone of {repo_name} failed: {result.stderr}")
+
+    _checkout_pr_head(repo_path, pr_info.number)
 
     try:
         diff = fetch_pr_diff(req.pr_url, req.github_token)

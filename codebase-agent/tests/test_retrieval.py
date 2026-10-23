@@ -1,4 +1,4 @@
-from retrieval.vector_store import VectorStore, SearchResult, _node_text
+from retrieval.vector_store import VectorStore, SearchResult, _node_text, _chunk_text
 from retrieval.ast_index import ASTIndex
 from retrieval.bm25_index import BM25Index
 from retrieval.hybrid_search import hybrid_search, diversify
@@ -64,6 +64,26 @@ def test_node_text_truncates_long_body():
                     start_line=1, end_line=3, signature="def big():", docstring="",
                     calls=[], body="x" * 10000)
     assert len(_node_text(node)) <= 2000
+
+
+def test_chunk_text_splits_long_text():
+    chunks = _chunk_text("a" * 3000, size=1200, overlap=200)
+    assert len(chunks) >= 2
+    assert all(len(c) <= 1200 for c in chunks)
+    assert _chunk_text("short text", size=1200) == ["short text"]
+
+
+def test_bm25_matches_body_only_keyword():
+    nodes = [
+        CodeNode(node_id="a", type="function", name="handler", file_path="a.py",
+                 start_line=1, end_line=3, signature="def handler():", docstring="",
+                 calls=[], body="def handler():\n    return compute_tax()"),
+        CodeNode(node_id="b", type="function", name="other", file_path="b.py",
+                 start_line=1, end_line=2, signature="def other():", docstring="", calls=[], body=""),
+    ]
+    results = BM25Index(nodes).search("compute_tax", k=1)
+    assert results
+    assert results[0].name == "handler"
 
 
 def test_bm25_matches_chinese_query():

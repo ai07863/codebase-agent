@@ -8,6 +8,11 @@ from retrieval.vector_store import SearchResult
 _WORD_RE = re.compile(r"[A-Za-z0-9_]+")
 _CAMEL_RE = re.compile(r"[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+|[0-9]+")
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]+")
+_BODY_TOKEN_CHARS = 2000
+
+
+def _node_document(node: CodeNode) -> str:
+    return f"{node.name} {node.signature} {node.docstring} {node.body[:_BODY_TOKEN_CHARS]}"
 
 
 def tokenize(text: str) -> list[str]:
@@ -26,7 +31,7 @@ class BM25Index:
         self.nodes = list(nodes)
         self.k1 = k1
         self.b = b
-        self._freqs = [Counter(tokenize(f"{n.name} {n.signature} {n.docstring}")) for n in self.nodes]
+        self._freqs = [Counter(tokenize(_node_document(n))) for n in self.nodes]
         self._lengths = [sum(f.values()) for f in self._freqs]
         self._avgdl = sum(self._lengths) / len(self._lengths) if self._lengths else 0.0
         self._df: Counter = Counter()

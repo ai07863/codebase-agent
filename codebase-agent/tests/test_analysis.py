@@ -106,6 +106,22 @@ def test_parse_diff_detects_added_deleted_and_renamed_files():
     assert files["new.py"].deletions == 1
 
 
+def test_extract_changed_lines_counts_pure_deletions():
+    raw = (
+        "diff --git a/mod.py b/mod.py\n"
+        "index abc..def 100644\n"
+        "--- a/mod.py\n"
+        "+++ b/mod.py\n"
+        "@@ -10,3 +10,1 @@\n"
+        " context\n"
+        "-removed one\n"
+        "-removed two\n"
+    )
+    files = _parse_diff(raw)
+    changed = _extract_changed_lines(files)
+    assert changed["mod.py"] == {11}
+
+
 def test_extract_changed_lines_maps_only_added_new_lines():
     raw = (
         "diff --git a/mod.py b/mod.py\n"

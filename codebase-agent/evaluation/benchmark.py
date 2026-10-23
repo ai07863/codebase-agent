@@ -37,7 +37,7 @@ def main():
         sys.exit(1)
 
     nodes = parse_repo(str(repo_path))
-    embedder = Embedder()
+    embedder = Embedder(settings.embedding_model)
     vector_store = VectorStore(repo_name=repo_name, persist_dir=settings.chroma_persist_dir)
     vector_store.add(nodes, embedder)
     ast_index = ASTIndex(nodes)
