@@ -6,6 +6,7 @@ from rich.console import Console
 from rich.markdown import Markdown
 from config.settings import Settings
 from code_parser.ast_parser import parse_repo
+from code_parser.repo_cache import parse_repo_cached
 from code_parser.relationship import build_call_graph
 from embedding.embedder import Embedder
 from retrieval.vector_store import VectorStore
@@ -48,7 +49,7 @@ def analyze(repo_url: str, branch: str | None):
             sys.exit(1)
 
     console.print("[green]正在使用 AST 解析代码...[/]")
-    nodes = parse_repo(str(repo_path))
+    nodes = parse_repo_cached(str(repo_path), settings.repo_cache_dir)
     console.print(f"[green]找到 {len(nodes)} 个函数/类[/]")
 
     console.print("[green]正在构建搜索索引...[/]")

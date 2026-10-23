@@ -4,17 +4,28 @@ from code_parser.relationship import find_callers
 from analysis.pr_diff import ChangedFile, PRDiff
 
 
+_HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+
+
 def _extract_changed_lines(files: list[ChangedFile]) -> dict[str, set[int]]:
     changed_lines: dict[str, set[int]] = {}
     for f in files:
-        lines = set()
+        lines: set[int] = set()
+        new_line_no = 0
         for line in f.patch.split("\n"):
-            m = re.match(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))?", line)
+            m = _HUNK_RE.match(line)
             if m:
-                start = int(m.group(1))
-                count = int(m.group(2)) if m.group(2) else 1
-                for i in range(start, start + count):
-                    lines.add(i)
+                new_line_no = int(m.group(1))
+                continue
+            if line.startswith("+++") or line.startswith("---"):
+                continue
+            if line.startswith("+"):
+                lines.add(new_line_no)
+                new_line_no += 1
+            elif line.startswith("-"):
+                continue
+            elif line.startswith(" "):
+                new_line_no += 1
         if lines:
             changed_lines[f.path] = lines
     return changed_lines

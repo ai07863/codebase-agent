@@ -3,8 +3,12 @@ import redis
 
 
 class Cache:
-    def __init__(self, host: str = "localhost", port: int = 6379, db: int = 0):
-        self.client = redis.Redis(host=host, port=port, db=db, decode_responses=True)
+    def __init__(self, host: str = "localhost", port: int = 6379, db: int = 0,
+                 socket_timeout: float = 1.0):
+        self.client = redis.Redis(
+            host=host, port=port, db=db, decode_responses=True,
+            socket_connect_timeout=socket_timeout, socket_timeout=socket_timeout,
+        )
 
     def _make_key(self, key: str) -> str:
         return f"codebase-agent:{hashlib.md5(key.encode()).hexdigest()}"

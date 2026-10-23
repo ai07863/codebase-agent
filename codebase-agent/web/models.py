@@ -14,11 +14,36 @@ class AnalyzeResponse(BaseModel):
 
 class QueryRequest(BaseModel):
     question: str
+    conversation_id: str | None = None
 
 
 class QueryResponse(BaseModel):
     answer: str
     repo_name: str
+    conversation_id: str | None = None
+
+
+class Message(BaseModel):
+    role: str
+    content: str
+    created_at: str
+
+
+class ConversationInfo(BaseModel):
+    id: str
+    repo: str
+    title: str
+    created_at: str
+    updated_at: str
+
+
+class Conversation(ConversationInfo):
+    messages: list[Message] = []
+
+
+class CreateConversationRequest(BaseModel):
+    repo: str
+    title: str = ""
 
 
 class RepoInfo(BaseModel):
@@ -29,6 +54,15 @@ class RepoInfo(BaseModel):
 
 class ErrorResponse(BaseModel):
     detail: str
+
+
+class FileView(BaseModel):
+    path: str
+    content: str
+    start: int
+    end: int
+    total_lines: int
+    first_line: int = 1
 
 
 class PRRequest(BaseModel):
@@ -59,6 +93,7 @@ class PRResponse(BaseModel):
     base_branch: str
     head_branch: str
     risk_score: str
+    summary: str = ""
     stats: PRStats
     files: list[FileBreakdown]
     impacted_callers: dict[str, list[str]]

@@ -11,6 +11,8 @@ class Settings:
     redis_port: int = field(default_factory=lambda: int(os.getenv("REDIS_PORT", "6379")))
     chroma_persist_dir: str = field(default_factory=lambda: os.getenv("CHROMA_PERSIST_DIR", "./data/chroma"))
     repos_dir: str = field(default_factory=lambda: os.getenv("REPOS_DIR", "./data/repos"))
+    history_db: str = field(default_factory=lambda: os.getenv("HISTORY_DB", "./data/history.db"))
+    repo_cache_dir: str = field(default_factory=lambda: os.getenv("REPO_CACHE_DIR", "./data/cache"))
 
     @classmethod
     def load(cls) -> "Settings":

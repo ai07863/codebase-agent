@@ -1,15 +1,18 @@
 from collections import defaultdict
 from code_parser.ast_parser import CodeNode
 from retrieval.vector_store import SearchResult
+from retrieval.bm25_index import BM25Index
 
 
 class ASTIndex:
     def __init__(self, nodes: list[CodeNode]):
+        self.nodes: list[CodeNode] = list(nodes)
         self.by_name: dict[str, list[CodeNode]] = defaultdict(list)
         self.by_file: dict[str, list[CodeNode]] = defaultdict(list)
         for node in nodes:
             self.by_name[node.name].append(node)
             self.by_file[node.file_path].append(node)
+        self.bm25 = BM25Index(self.nodes)
 
     def lookup(self, name: str) -> list[CodeNode]:
         return self.by_name.get(name, [])

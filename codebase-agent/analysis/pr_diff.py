@@ -1,6 +1,21 @@
+import ssl
 import re
 import httpx
 from dataclasses import dataclass, field
+
+
+def _ssl_verify():
+    """Use the OS trust store (via truststore) when available.
+
+    Corporate/accelerator proxies (e.g. Steam++/Watt Toolkit) install their own
+    root CA into the Windows store; Python's bundled certifi bundle does not know
+    it, so plain httpx fails TLS verification. truststore makes httpx trust the
+    same store git/.NET use."""
+    try:
+        import truststore
+        return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    except Exception:
+        return True
 
 
 @dataclass
@@ -52,7 +67,7 @@ def fetch_pr_diff(url: str, token: str | None = None) -> PRDiff:
     if token:
         headers_meta["Authorization"] = f"Bearer {token}"
 
-    with httpx.Client() as client:
+    with httpx.Client(verify=_ssl_verify()) as client:
         meta_resp = client.get(diff_url, headers=headers_meta)
         meta_resp.raise_for_status()
         meta = meta_resp.json()
@@ -69,46 +84,57 @@ def fetch_pr_diff(url: str, token: str | None = None) -> PRDiff:
     return PRDiff(pr=pr_info, files=files)
 
 
+_DIFF_GIT_RE = re.compile(r"^diff --git a/(.+) b/(.+)$")
+
+
+def _strip_path_prefix(path: str) -> str:
+    if path.startswith("a/") or path.startswith("b/"):
+        return path[2:]
+    return path
+
+
 def _parse_diff(raw_diff: str) -> list[ChangedFile]:
-    files = []
-    current_file = None
-    current_patch = []
-    additions = 0
-    deletions = 0
+    files: list[ChangedFile] = []
+    current: ChangedFile | None = None
 
     for line in raw_diff.split("\n"):
-        if line.startswith("diff --git"):
-            if current_file:
-                files.append(ChangedFile(
-                    path=current_file, additions=additions, deletions=deletions,
-                    patch="\n".join(current_patch), status="modified"))
-            current_file = None
-            current_patch = []
-            additions = 0
-            deletions = 0
-        elif line.startswith("--- a/") or line.startswith("+++ b/"):
-            if line.startswith("+++ b/"):
-                current_file = line[6:]
-        elif line.startswith("@@") and current_file:
-            parts = line.split(" ")
-            for part in parts:
-                if part.startswith("+"):
-                    counts = part[1:].split(",")
-                    additions += int(counts[1]) if len(counts) > 1 else 1
-                elif part.startswith("-"):
-                    counts = part[1:].split(",")
-                    deletions += int(counts[1]) if len(counts) > 1 else 1
+        if line.startswith("diff --git "):
+            if current is not None:
+                files.append(current)
+            m = _DIFF_GIT_RE.match(line)
+            path = m.group(2) if m else line[len("diff --git "):].strip()
+            current = ChangedFile(path=path, additions=0, deletions=0, patch="", status="modified")
+            continue
+        if current is None:
+            continue
 
-        if current_file:
-            current_patch.append(line)
+        if line.startswith("new file mode"):
+            current.status = "added"
+        elif line.startswith("deleted file mode"):
+            current.status = "deleted"
+        elif line.startswith("rename from "):
+            current.status = "renamed"
+        elif line.startswith("rename to "):
+            current.status = "renamed"
+            current.path = _strip_path_prefix(line[len("rename to "):].strip())
+        elif line.startswith("--- "):
+            if line[4:].strip() == "/dev/null":
+                current.status = "added"
+        elif line.startswith("+++ "):
+            target = line[4:].strip()
+            if target == "/dev/null":
+                current.status = "deleted"
+            else:
+                current.path = _strip_path_prefix(target)
+        elif line.startswith("@@") or line.startswith(" ") or line.startswith("\\ No newline"):
+            current.patch += line + "\n"
+        elif line.startswith("+"):
+            current.additions += 1
+            current.patch += line + "\n"
+        elif line.startswith("-"):
+            current.deletions += 1
+            current.patch += line + "\n"
 
-    if current_file:
-        files.append(ChangedFile(
-            path=current_file, additions=additions, deletions=deletions,
-            patch="\n".join(current_patch), status="modified"))
-
-    for f in files:
-        if "/dev/null" in f.patch.split("\n")[0]:
-            f.status = "deleted" if f.deletions > 0 else "added"
-
+    if current is not None:
+        files.append(current)
     return files
