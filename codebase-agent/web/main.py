@@ -1,4 +1,5 @@
 import logging
+import shutil
 import subprocess
 import traceback
 from pathlib import Path
@@ -50,13 +51,32 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="CodeBase Agent API", version="0.2.0", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+_origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()] or [
+    "http://127.0.0.1:8000", "http://localhost:8000",
+]
+app.add_middleware(CORSMiddleware, allow_origins=_origins, allow_methods=["*"], allow_headers=["*"])
+
+
+@app.middleware("http")
+async def _auth_middleware(request: Request, call_next):
+    token = settings.api_token
+    path = request.url.path
+    public = path == "/health" or path.startswith("/ui") or path.startswith("/openapi")
+    if token and not public:
+        provided = request.headers.get("x-api-token") or request.headers.get("authorization", "")
+        if provided.lower().startswith("bearer "):
+            provided = provided[7:]
+        if provided.strip() != token:
+            return JSONResponse(status_code=401, content={"detail": "未授权：缺少或错误的 API Token"})
+    return await call_next(request)
 
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     logger.error("未处理异常 %s %s：%s\n%s", request.method, request.url.path, exc, traceback.format_exc())
-    return JSONResponse(status_code=500, content={"detail": f"服务器内部错误：{exc}"})
+    detail = f"服务器内部错误：{exc}" if settings.debug else "服务器内部错误，请查看服务端日志"
+    return JSONResponse(status_code=500, content={"detail": detail})
 app.mount("/ui", StaticFiles(directory=str(_STATIC_DIR), html=True), name="static")
 
 
@@ -213,6 +233,23 @@ def get_conversation(conv_id: str):
 def delete_conversation(conv_id: str):
     _history.delete(conv_id)
     return {"status": "deleted"}
+
+
+@app.delete("/repos/{repo_name}")
+def delete_repo(repo_name: str):
+    repo_path = Path(settings.repos_dir) / repo_name
+    with _index_lock:
+        _indexes.pop(repo_name, None)
+        _cache.pop(repo_name, None)
+    try:
+        VectorStore(repo_name=repo_name, persist_dir=settings.chroma_persist_dir).client.delete_collection(
+            f"code_nodes_{repo_name}"
+        )
+    except Exception as exc:
+        logger.warning("删除集合失败：%s", exc)
+    if repo_path.exists():
+        shutil.rmtree(repo_path, ignore_errors=True)
+    return {"status": "deleted", "repo": repo_name}
 
 
 @app.get("/repos/{repo_name}/file", response_model=FileView)

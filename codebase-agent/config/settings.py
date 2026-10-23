@@ -14,6 +14,9 @@ class Settings:
     repos_dir: str = field(default_factory=lambda: os.getenv("REPOS_DIR", "./data/repos"))
     history_db: str = field(default_factory=lambda: os.getenv("HISTORY_DB", "./data/history.db"))
     repo_cache_dir: str = field(default_factory=lambda: os.getenv("REPO_CACHE_DIR", "./data/cache"))
+    api_token: str = field(default_factory=lambda: os.getenv("API_TOKEN", ""))
+    cors_origins: str = field(default_factory=lambda: os.getenv("CORS_ORIGINS", ""))
+    debug: bool = field(default_factory=lambda: os.getenv("DEBUG", "0").lower() in ("1", "true", "yes"))
 
     @classmethod
     def load(cls) -> "Settings":

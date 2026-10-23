@@ -16,6 +16,8 @@ class ConversationStore:
     def _conn(self) -> sqlite3.Connection:
         con = sqlite3.connect(self.db_path)
         con.row_factory = sqlite3.Row
+        con.execute("PRAGMA journal_mode=WAL")
+        con.execute("PRAGMA busy_timeout=5000")
         return con
 
     def _init(self) -> None:

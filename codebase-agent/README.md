@@ -1,46 +1,89 @@
 # CodeBase Agent
 
-用自然语言分析任意 GitHub 仓库。提问代码结构、查找函数、理解架构。
+用自然语言分析 GitHub 仓库：提问代码结构、查找函数、理解架构、查看调用关系、评审 PR。
 
 ## 快速开始
 
-```bash
-# 克隆并进入
-git clone <this-repo> && cd codebase-agent
+### Web 界面（推荐）
 
+```bash
 # 配置
 cp .env.example .env
-# 编辑 .env，填入你的 LLM_API_KEY
+# 编辑 .env：填入 LLM_API_KEY（+ LLM_MODEL / LLM_BASE_URL）
 
-# 启动 Redis 并运行
-docker compose up -d
-codebase-agent analyze https://github.com/gin-gonic/gin
+# 启动（Windows）
+run.cmd
+# 或手动：
+#   python -m uvicorn web.main:app --host 127.0.0.1 --port 8000
 ```
+
+打开 http://127.0.0.1:8000/ui/ 。输入一个 **Python 或 Go** 仓库地址点"分析"，然后在"问答"里提问。
+
+> 首次启动会下载 embedding 模型（约 30MB），之后 `run.cmd` 用本地缓存离线加载，启动只需几秒。
+> Windows 下如遇命令行中文乱码，可先执行 `chcp 65001`。
+
+### 命令行
+
+```bash
+pip install -e ".[dev]"        # 安装（含测试依赖）
+codebase-agent analyze https://github.com/psf/requests
+```
+
+## 功能
+
+- **代码问答**：混合检索（向量 + BM25 + AST 名字匹配，RRF 融合）+ 项目结构地图；引用文件可点击查看源码；长函数按块索引。
+- **对话历史**：SQLite 持久化，左侧可折叠边栏，支持多轮追问（历史会带入模型）。
+- **依赖图**：基于 vis-network，四种视图（洋葱分层逐层展开 / 交互式 / 模块聚合 / 调用树）；点边显示关系说明。
+- **PR 分析**：拉取 GitHub PR（会切到 PR head 保证行号对齐），输出中文报告 + AI 总结（改了什么、影响、风险）。
+- **Go 支持**：tree-sitter-python + tree-sitter-go，按语言映射节点类型。
+
+## 配置（`.env`）
+
+| 变量 | 说明 | 默认 |
+|---|---|---|
+| `LLM_API_KEY` | LLM 密钥 | 空 |
+| `LLM_MODEL` | 模型名 | `gpt-4o-mini` |
+| `LLM_BASE_URL` | OpenAI 兼容地址 | `https://api.openai.com/v1` |
+| `EMBEDDING_MODEL` | 向量模型 | `BAAI/bge-small-zh-v1.5` |
+| `REDIS_HOST` / `REDIS_PORT` | 问答缓存（可选，不可用会自动降级） | `localhost` / `6379` |
+| `HISTORY_DB` | 对话历史 SQLite | `./data/history.db` |
+| `REPO_CACHE_DIR` | 解析结果缓存 | `./data/cache` |
+| `API_TOKEN` | 设置后所有 API 需带 `X-API-Token`（默认不鉴权，仅本机） | 空 |
+| `CORS_ORIGINS` | 允许的跨域来源（逗号分隔） | 本机 |
+| `DEBUG` | `1` 时错误信息回显详情 | `0` |
 
 ## 工作原理
 
-1. **克隆** — 使用 `--depth 1` 拉取仓库
-2. **AST 解析** — 用 tree-sitter 提取每个函数、类和方法
-3. **索引** — embedding 存入 ChromaDB；内存中构建 AST 索引
-4. **问答** — 自然语言问题路由到对应的搜索策略
+1. **克隆** — `--depth 1` 拉取
+2. **AST 解析** — tree-sitter 提取每个函数/类/方法（结果按文件指纹落盘缓存）
+3. **索引** — 按块 embedding 存入 ChromaDB（仅对新增/变更块重嵌）；BM25 + 内存 AST 索引
+4. **问答** — 路由到精确/混合检索，拼装上下文交给 LLM，答案可带 Mermaid 架构图
 
 ## 架构
 
 ```
 codebase-agent/
 ├── cli/           # Click 命令行
-├── agent/         # ReAct 循环 + 工具
-├── code_parser/   # tree-sitter AST
-├── retrieval/     # ChromaDB + BM25 + AST 索引
-├── embedding/     # BGE-small-zh
-├── cache/         # Redis
+├── agent/         # ReAct 循环 + 检索编排
+├── code_parser/   # tree-sitter AST（Python/Go）+ 解析缓存
+├── retrieval/     # ChromaDB + BM25 + AST 索引 + RRF 融合
+├── embedding/     # 可配置向量模型
+├── cache/         # Redis（可选）
+├── analysis/      # PR diff / 影响分析 / 中文报告
+├── web/           # FastAPI + 静态前端（UI、对话历史、文件查看）
 ├── evaluation/    # 评测 + Q&A 数据集
 └── config/        # 配置
 ```
 
-## 评测
+## 测试
 
 ```bash
-python -m evaluation.benchmark gin
-python -m evaluation.benchmark fastapi
+pip install -e ".[dev]"
+pytest
 ```
+
+## 数据清理
+
+- 删除某个仓库（含克隆与索引）：`DELETE /repos/{repo_name}`
+- 对话历史可用界面里的"删除"按钮，或直接删 `data/history.db`
+- 彻底重建索引：删掉 `data/chroma` 后重新分析
