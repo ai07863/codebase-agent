@@ -106,8 +106,12 @@ button:disabled { filter: grayscale(0.4); }
 .repo-count { color: var(--muted); }
 .chat-box { border: 1px solid var(--line); border-radius: 10px; background: #100c1c; }
 .chat-msg { border-radius: 10px; }
-.chat-q { background: rgba(34,211,238,0.16); border: 1px solid rgba(34,211,238,0.35); }
-.chat-a { background: rgba(167,139,250,0.14); border: 1px solid rgba(167,139,250,0.32); }
+.chat-q { background: linear-gradient(135deg, #22d3ee, #4ade80); color: #06231f; border: none; border-left: 4px solid #ffd93d; font-weight: 600; }
+.chat-a { background: #201935; color: var(--text); border: 1px solid var(--line); border-left: 4px solid #ff5fa2; }
+.chat-q, .chat-a { position: relative; margin-top: 8px; }
+.chat-q::before { content: '你'; position: absolute; top: -9px; right: 8px; font-size: 10px; line-height: 16px; padding: 0 7px; border-radius: 8px; background: #ffd93d; color: #241640; font-weight: 700; }
+.chat-a::before { content: 'AI'; position: absolute; top: -9px; right: 8px; font-size: 10px; line-height: 16px; padding: 0 7px; border-radius: 8px; background: #ff5fa2; color: #1a0b14; font-weight: 700; }
+.chat-q a, .chat-a a { color: inherit; }
 .chat-a h1, .chat-a h2, .chat-a h3 { color: var(--cyan); }
 .chat-a code { background: #241a3a; color: var(--yellow); border-radius: 5px; }
 .chat-a pre { background: #0b0817; border: 1px solid var(--line); border-radius: 8px; }
@@ -165,6 +169,35 @@ pre { background: #0b0817; border: 1px solid var(--line); border-radius: 8px; }
 .conv-del:hover { color: #fb7185; }
 .chat-hint { color: var(--muted); }
 .pr-report { max-width: 100%; margin: 0; }
+.mascot { position: fixed; right: 20px; bottom: 20px; z-index: 850; width: 120px; height: auto;
+  cursor: grab; user-select: none; transform: translate(var(--mx, 0px), var(--my, 0px));
+  transition: transform .18s ease-out; }
+.mascot img { width: 100%; height: auto; display: block; pointer-events: none;
+  transform-origin: 50% 90%; filter: drop-shadow(0 6px 12px rgba(0,0,0,0.45));
+  animation: mascot-float 3.2s ease-in-out infinite; }
+.mascot:hover img { animation: mascot-float-hover 1.6s ease-in-out infinite;
+  filter: drop-shadow(0 0 16px rgba(255,95,162,0.9)); }
+.mascot.dragging { cursor: grabbing; }
+.mascot.thinking img { animation: mascot-shake .45s ease-in-out infinite; }
+.mascot.happy img { animation: mascot-hop .6s ease; }
+@keyframes mascot-float {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-8px) scale(1.03); }
+}
+@keyframes mascot-float-hover {
+  0%, 100% { transform: translateY(0) scale(1.08); }
+  50% { transform: translateY(-8px) scale(1.14); }
+}
+@keyframes mascot-shake {
+  0%, 100% { transform: translateY(0) rotate(-5deg); }
+  50% { transform: translateY(-4px) rotate(5deg); }
+}
+@keyframes mascot-hop {
+  0% { transform: translateY(0) scale(1); }
+  30% { transform: translateY(-18px) scale(1.08); }
+  60% { transform: translateY(0) scale(0.95); }
+  100% { transform: translateY(0) scale(1); }
+}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -283,6 +316,8 @@ pre { background: #0b0817; border: 1px solid var(--line); border-radius: 8px; }
     <div class="diagram-body" id="diagramBody"></div>
   </div>
 </div>
+
+<div id="mascot" class="mascot" title="拖动我到别处；点我互动"><img src="/ui/mascot.png" alt=""></div>
 
 <script>
 const API = window.location.origin;
@@ -678,6 +713,7 @@ async function askQuestion() {
   pending.textContent = '思考中...';
   box.appendChild(pending);
   box.scrollTop = box.scrollHeight;
+  mascotState('thinking');
   try {
     const data = await apiPost(`/repos/${repo}/query`, {question: q, conversation_id: currentConvId});
     const bubble = document.createElement('div');
@@ -687,7 +723,9 @@ async function askQuestion() {
     linkifyFileRefs(bubble);
     await renderMermaidBlocks(bubble);
     loadConversations();
+    mascotState('happy');
   } catch(e) {
+    mascotState('');
     pending.style.color = '#e74c3c';
     pending.textContent = '错误: ' + e.message;
   }
@@ -1097,6 +1135,68 @@ async function loadGraph() {
     hint.textContent = '加载失败: ' + e.message;
   }
 }
+
+function mascotState(state) {
+  const m = document.getElementById('mascot');
+  if (!m) return;
+  m.classList.remove('thinking', 'happy');
+  if (state === 'thinking') m.classList.add('thinking');
+  else if (state === 'happy') {
+    m.classList.add('happy');
+    setTimeout(() => m.classList.remove('happy'), 600);
+  }
+}
+
+(function initMascot() {
+  const m = document.getElementById('mascot');
+  if (!m) return;
+  try {
+    const saved = JSON.parse(localStorage.getItem('cba.mascotPos') || 'null');
+    if (saved && typeof saved.left === 'number') {
+      m.style.left = saved.left + 'px';
+      m.style.top = saved.top + 'px';
+      m.style.right = 'auto';
+      m.style.bottom = 'auto';
+    }
+  } catch (e) {}
+  let dragging = false, moved = false, offX = 0, offY = 0;
+  m.addEventListener('mousedown', (e) => {
+    dragging = true; moved = false;
+    m.classList.add('dragging');
+    const rect = m.getBoundingClientRect();
+    if (m.style.right !== 'auto') {
+      m.style.left = rect.left + 'px'; m.style.top = rect.top + 'px';
+      m.style.right = 'auto'; m.style.bottom = 'auto';
+    }
+    offX = e.clientX - rect.left; offY = e.clientY - rect.top;
+    e.preventDefault();
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (dragging) {
+      moved = true;
+      m.style.left = Math.max(0, Math.min(window.innerWidth - m.offsetWidth, e.clientX - offX)) + 'px';
+      m.style.top = Math.max(0, Math.min(window.innerHeight - m.offsetHeight, e.clientY - offY)) + 'px';
+      return;
+    }
+    const rect = m.getBoundingClientRect();
+    const dx = (e.clientX - (rect.left + rect.width / 2)) / window.innerWidth;
+    const dy = (e.clientY - (rect.top + rect.height / 2)) / window.innerHeight;
+    m.style.setProperty('--mx', (dx * 16).toFixed(1) + 'px');
+    m.style.setProperty('--my', (dy * 16).toFixed(1) + 'px');
+  });
+  window.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    m.classList.remove('dragging');
+    if (moved) {
+      try {
+        localStorage.setItem('cba.mascotPos', JSON.stringify({
+          left: parseInt(m.style.left, 10), top: parseInt(m.style.top, 10),
+        }));
+      } catch (e) {}
+    }
+  });
+})();
 
 initSidebar();
 loadConversations();
