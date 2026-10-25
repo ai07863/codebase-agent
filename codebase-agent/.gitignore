@@ -6,3 +6,4 @@ data/
 chroma/
 *.egg-info/
 dist/
+web/static/mascot_src.png
