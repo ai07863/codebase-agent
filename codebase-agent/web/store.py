@@ -71,14 +71,15 @@ class ConversationStore:
         conversation["messages"] = [dict(m) for m in msgs]
         return conversation
 
-    def add_message(self, conv_id: str, role: str, content: str) -> None:
+    def add_message(self, conv_id: str, role: str, content: str) -> int:
         now = _now()
         with self._conn() as con:
-            con.execute(
+            cur = con.execute(
                 "INSERT INTO messages (conversation_id, role, content, created_at) VALUES (?,?,?,?)",
                 (conv_id, role, content, now),
             )
             con.execute("UPDATE conversations SET updated_at = ? WHERE id = ?", (now, conv_id))
+            return int(cur.lastrowid)
 
     def message_count(self, conv_id: str) -> int:
         with self._conn() as con:

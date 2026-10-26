@@ -115,8 +115,17 @@ def _build_user_message(query: str, context: str, overview: bool = False) -> str
 
 
 def _build_messages(query: str, context: str, overview: bool = False,
-                    history: list[dict] | None = None) -> list[dict]:
+                    history: list[dict] | None = None,
+                    recall: list[dict] | None = None) -> list[dict]:
     messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
+    if recall:
+        lines = "\n".join(
+            f"[{m.get('role', 'user')}] {(m.get('text') or '')[:800]}" for m in recall
+        )
+        messages.append({
+            "role": "system",
+            "content": "这是可能与当前问题相关的**更早对话**片段，可用于回溯：\n" + lines,
+        })
     for msg in (history or [])[-12:]:
         role = msg.get("role")
         content = msg.get("content")
@@ -169,7 +178,8 @@ def _cache_set(cache: Cache | None, key: str, value: str, ttl: int = 86400) -> N
 
 def process_query(query: str, repo_path: str, vector_store: VectorStore,
                   ast_index: ASTIndex, embedder: Embedder, settings: Settings,
-                  history: list[dict] | None = None) -> str:
+                  history: list[dict] | None = None,
+                  recall: list[dict] | None = None) -> str:
     repo_name = repo_path.rstrip("/\\").split("/")[-1].split("\\")[-1]
     cache_key = f"qa:v2:{repo_name}:{query}"
 
@@ -194,7 +204,7 @@ def process_query(query: str, repo_path: str, vector_store: VectorStore,
             len(context),
         )
 
-        messages = _build_messages(query, context, overview, history)
+        messages = _build_messages(query, context, overview, history, recall)
 
         response = _chat(client, settings.llm_model, messages)
 

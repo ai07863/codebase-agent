@@ -17,6 +17,7 @@ from code_parser.relationship import build_call_graph, graph_data, file_level_ed
 from embedding.embedder import Embedder
 from retrieval.vector_store import VectorStore
 from retrieval.ast_index import ASTIndex
+from retrieval.chat_index import ChatIndex
 from agent.react_loop import process_query
 from web.models import (
     AnalyzeRequest, AnalyzeResponse, QueryRequest, QueryResponse, RepoInfo,
@@ -33,6 +34,7 @@ logger = logging.getLogger("codebase-agent")
 
 settings = Settings.load()
 _history = ConversationStore(settings.history_db)
+_chat_index = ChatIndex(settings.chroma_persist_dir)
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 _MAX_VIEW_BYTES = 300_000
 _embedder: Embedder | None = None
@@ -207,11 +209,34 @@ def query_repo(repo_name: str, req: QueryRequest):
         conv = _history.get(conv_id)
         if conv:
             history.extend({"role": m["role"], "content": m["content"]} for m in conv["messages"][-6:])
+
+    # RAG over chat: retrieve older messages relevant to this question
+    recall = []
+    if _embedder is not None:
+        seen = {(m["role"], m["content"]) for m in history}
+        for cid in (req.context_conversation_id, conv_id):
+            if not cid:
+                continue
+            try:
+                for m in _chat_index.query(cid, req.question, _embedder, k=4):
+                    key = (m["role"], m["text"])
+                    if key not in seen:
+                        seen.add(key)
+                        recall.append(m)
+            except Exception as exc:
+                logger.warning("chat recall failed: %s", exc)
+        recall = recall[:5]
+
     answer = process_query(req.question, str(repo_path), vector_store, ast_index, _embedder,
-                           settings, history=history)
+                           settings, history=history, recall=recall)
     if conv_id:
-        _history.add_message(conv_id, "user", req.question)
-        _history.add_message(conv_id, "assistant", answer)
+        for role, text in (("user", req.question), ("assistant", answer)):
+            mid = _history.add_message(conv_id, role, text)
+            if _embedder is not None:
+                try:
+                    _chat_index.add(conv_id, mid, role, text, _embedder)
+                except Exception as exc:
+                    logger.warning("chat index failed: %s", exc)
     return QueryResponse(answer=answer, repo_name=repo_name, conversation_id=conv_id)
 
 

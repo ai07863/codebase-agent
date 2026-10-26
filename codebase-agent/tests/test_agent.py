@@ -93,6 +93,14 @@ def test_build_messages_includes_history():
     assert "CTX_BODY" in msgs[-1]["content"]
 
 
+def test_build_messages_includes_recall():
+    from agent.react_loop import _build_messages
+    recall = [{"role": "assistant", "text": "早期回答：融合用 RRF"}]
+    msgs = _build_messages("那它调用谁", "CTX_BODY", False, [], recall)
+    system_text = "\n".join(m["content"] for m in msgs if m["role"] == "system")
+    assert "RRF" in system_text
+
+
 def test_build_user_message_adds_diagram_instruction_for_overview():
     from agent.react_loop import _build_user_message
     msg = _build_user_message("说说总体框架", "CONTEXT_BODY", overview=True)
