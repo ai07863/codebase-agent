@@ -15,6 +15,7 @@ class AnalyzeResponse(BaseModel):
 class QueryRequest(BaseModel):
     question: str
     conversation_id: str | None = None
+    context_conversation_id: str | None = None
 
 
 class QueryResponse(BaseModel):

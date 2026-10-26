@@ -117,7 +117,7 @@ def _build_user_message(query: str, context: str, overview: bool = False) -> str
 def _build_messages(query: str, context: str, overview: bool = False,
                     history: list[dict] | None = None) -> list[dict]:
     messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
-    for msg in (history or [])[-8:]:
+    for msg in (history or [])[-12:]:
         role = msg.get("role")
         content = msg.get("content")
         if role in ("user", "assistant") and content:

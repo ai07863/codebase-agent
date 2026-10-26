@@ -154,7 +154,13 @@ pre { background: #0b0817; border: 1px solid var(--line); border-radius: 8px; }
 .qa-sidebar.hidden { display: none; }
 .qa-sidebar-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; }
 .qa-sidebar-head span { color: var(--cyan); font-weight: 700; font-size: 13px; }
-.qa-main { flex: 1; min-width: 0; }
+.qa-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.qa-panes { display: flex; gap: 16px; align-items: stretch; height: calc(100vh - 235px); }
+.qa-pane { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; margin-bottom: 0; overflow: hidden; }
+.qa-pane.focused { border-color: var(--pink); box-shadow: 0 0 0 1px var(--pink), 0 8px 28px rgba(255,95,162,0.2); }
+.qa-pane-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
+.qa-pane-title { color: var(--cyan); font-weight: 700; font-size: 14px; }
+.qa-pane .chat-box { flex: 1 1 auto; height: auto; min-height: 180px; }
 .qa-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .qa-head h2 { margin: 0; }
 .qa-head button { flex: 0 0 auto; }
@@ -214,6 +220,9 @@ html, body { -webkit-text-size-adjust: 100%; }
   .tab-btn { padding: 8px 12px; font-size: 12px; flex: 0 1 auto; }
   .qa-layout { flex-direction: column; gap: 10px; align-items: stretch; }
   .qa-main { width: 100%; }
+  .qa-panes { flex-direction: column; height: auto; }
+  .qa-pane { flex: none; }
+  .qa-pane .chat-box { height: 40vh; min-height: 200px; }
   .qa-sidebar { width: 100%; flex: none; max-height: 38vh; }
   .chat-box { height: calc(100vh - 360px); min-height: 240px; }
   .chat-msg { max-width: 100%; }
@@ -286,18 +295,38 @@ html, body { -webkit-text-size-adjust: 100%; }
         </div>
         <ul id="convList" class="conv-list"><li class="conv-empty">加载中...</li></ul>
       </aside>
-      <div class="card qa-main">
+      <div class="qa-main">
         <div class="qa-head">
           <button class="btn-sm" id="sidebarToggle" onclick="toggleSidebar()">隐藏边栏</button>
-          <h2>代码问答</h2>
+          <select id="qaRepo" style="flex:1;padding:8px;border:1px solid #ddd;border-radius:6px"></select>
         </div>
-        <select id="qaRepo" style="width:100%;padding:8px;margin-bottom:8px;border:1px solid #ddd;border-radius:6px"></select>
-        <div class="chat-box" id="chatBox">
-          <div class="chat-msg chat-a chat-hint">选择一个仓库并开始提问</div>
-        </div>
-        <div class="chat-input-row">
-          <input type="text" id="qaInput" placeholder="这个项目的路由是怎么组织的？" onkeydown="if(event.key==='Enter') askQuestion()">
-          <button onclick="askQuestion()">发送</button>
+        <div class="qa-panes" id="qaPanes">
+          <div class="card qa-pane focused" data-pane="A">
+            <div class="qa-pane-head">
+              <span class="qa-pane-title">总览</span>
+              <button class="btn-sm" onclick="newConversationForPane('A')">新对话</button>
+            </div>
+            <div class="chat-box" id="chatBoxA">
+              <div class="chat-msg chat-a chat-hint">总览：这个项目整体怎么组织？</div>
+            </div>
+            <div class="chat-input-row">
+              <input type="text" id="qaInputA" placeholder="总览：整体架构 / 模块划分…" onkeydown="if(event.key==='Enter') askQuestion('A')">
+              <button onclick="askQuestion('A')">发送</button>
+            </div>
+          </div>
+          <div class="card qa-pane" data-pane="B">
+            <div class="qa-pane-head">
+              <span class="qa-pane-title">细节</span>
+              <button class="btn-sm" onclick="newConversationForPane('B')">新对话</button>
+            </div>
+            <div class="chat-box" id="chatBoxB">
+              <div class="chat-msg chat-a chat-hint">细节：针对某个函数 / 文件提问（可引用总览）</div>
+            </div>
+            <div class="chat-input-row">
+              <input type="text" id="qaInputB" placeholder="细节：某个函数怎么实现的？" onkeydown="if(event.key==='Enter') askQuestion('B')">
+              <button onclick="askQuestion('B')">发送</button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -611,15 +640,28 @@ async function openViewer(path, start, end) {
   }
 }
 
-document.getElementById('chatBox').addEventListener('click', (e) => {
+const _qaPanesEl = document.getElementById('qaPanes');
+if (_qaPanesEl) _qaPanesEl.addEventListener('click', (e) => {
   const el = e.target.closest('code.file-link');
   if (el) openViewer(el.dataset.path, el.dataset.start, el.dataset.end);
 });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeViewer(); closeDiagram(); } });
 
 let conversations = [];
-let currentConvId = null;
-let currentConvRepo = null;
+const PANES = ['A', 'B'];
+const paneState = { A: { convId: null, repo: null }, B: { convId: null, repo: null } };
+let focusedPane = 'A';
+
+function paneEl(id) { return document.querySelector('.qa-pane[data-pane="' + id + '"]'); }
+function paneBox(id) { return document.getElementById('chatBox' + id); }
+function paneInput(id) { return document.getElementById('qaInput' + id); }
+function setFocusedPane(id) {
+  focusedPane = id;
+  PANES.forEach(p => { const el = paneEl(p); if (el) el.classList.toggle('focused', p === id); });
+}
+function anyPaneHasConv(id) {
+  return PANES.some(p => paneState[p].convId === id);
+}
 
 function renderConvList() {
   const list = document.getElementById('convList');
@@ -633,7 +675,7 @@ function renderConvList() {
   }
   conversations.forEach(c => {
     const li = document.createElement('li');
-    li.className = 'conv-item' + (c.id === currentConvId ? ' active' : '');
+    li.className = 'conv-item' + (anyPaneHasConv(c.id) ? ' active' : '');
     const title = document.createElement('div');
     title.className = 'conv-title';
     title.textContent = c.title || '(无标题)';
@@ -662,8 +704,8 @@ async function loadConversations() {
   } catch (e) { console.error(e); }
 }
 
-function appendMessage(role, content) {
-  const box = document.getElementById('chatBox');
+function appendMessage(paneId, role, content) {
+  const box = paneBox(paneId);
   const bubble = document.createElement('div');
   bubble.className = 'chat-msg ' + (role === 'user' ? 'chat-q' : 'chat-a');
   if (role === 'user') {
@@ -678,43 +720,60 @@ function appendMessage(role, content) {
   return bubble;
 }
 
-function clearChat() {
-  const box = document.getElementById('chatBox');
+function clearChat(paneId) {
+  const box = paneBox(paneId);
+  if (!box) return;
   box.innerHTML = '';
   const hint = document.createElement('div');
   hint.className = 'chat-msg chat-a chat-hint';
-  hint.textContent = '选择一个仓库并开始提问';
+  hint.textContent = paneId === 'A'
+    ? '总览：这个项目整体怎么组织？'
+    : '细节：针对某个函数 / 文件提问（可引用总览）';
   box.appendChild(hint);
 }
 
 async function openConversation(id) {
+  const paneId = focusedPane;
   try {
     const conv = await apiGet(`/conversations/${id}`);
-    currentConvId = conv.id;
-    currentConvRepo = conv.repo;
+    paneState[paneId] = { convId: conv.id, repo: conv.repo };
     document.getElementById('qaRepo').value = conv.repo;
-    const box = document.getElementById('chatBox');
+    const box = paneBox(paneId);
     box.innerHTML = '';
-    conv.messages.forEach(m => appendMessage(m.role, m.content));
+    conv.messages.forEach(m => appendMessage(paneId, m.role, m.content));
     renderConvList();
     box.scrollTop = box.scrollHeight;
+    setFocusedPane(paneId);
   } catch (e) { alert('打开失败: ' + e.message); }
 }
 
-function newConversation() {
-  currentConvId = null;
-  currentConvRepo = null;
-  clearChat();
+function newConversationForPane(paneId) {
+  paneState[paneId] = { convId: null, repo: null };
+  clearChat(paneId);
   renderConvList();
-  document.getElementById('qaInput').focus();
+  const inp = paneInput(paneId);
+  if (inp) inp.focus();
+  setFocusedPane(paneId);
 }
+
+function newConversation() { newConversationForPane(focusedPane); }
 
 async function deleteConversation(id) {
   try {
     await fetch(API + `/conversations/${id}`, {method: 'DELETE'});
-    if (currentConvId === id) newConversation();
+    PANES.forEach(p => { if (paneState[p].convId === id) newConversationForPane(p); });
     await loadConversations();
   } catch (e) { console.error(e); }
+}
+
+function initPanes() {
+  PANES.forEach(p => {
+    const el = paneEl(p);
+    if (!el) return;
+    el.addEventListener('mousedown', () => setFocusedPane(p));
+    const inp = paneInput(p);
+    if (inp) inp.addEventListener('focus', () => setFocusedPane(p));
+  });
 }
 
 function toggleSidebar() {
@@ -733,25 +792,27 @@ function initSidebar() {
   }
 }
 
-async function askQuestion() {
+async function askQuestion(paneId) {
+  paneId = paneId || focusedPane;
+  setFocusedPane(paneId);
   const repo = document.getElementById('qaRepo').value;
-  const q = document.getElementById('qaInput').value.trim();
+  const input = paneInput(paneId);
+  const q = input.value.trim();
   if (!repo || !q) return;
-  const box = document.getElementById('chatBox');
+  const box = paneBox(paneId);
   const hint = box.querySelector('.chat-hint');
   if (hint) hint.remove();
 
-  if (!currentConvId || currentConvRepo !== repo) {
+  if (!paneState[paneId].convId || paneState[paneId].repo !== repo) {
     try {
       const conv = await apiPost('/conversations', {repo: repo, title: q});
-      currentConvId = conv.id;
-      currentConvRepo = conv.repo;
+      paneState[paneId] = { convId: conv.id, repo: conv.repo };
       renderConvList();
     } catch (e) { /* proceed without history if creation fails */ }
   }
 
-  appendMessage('user', q);
-  document.getElementById('qaInput').value = '';
+  appendMessage(paneId, 'user', q);
+  input.value = '';
   const pending = document.createElement('div');
   pending.className = 'chat-msg chat-a';
   pending.style.color = '#888';
@@ -759,8 +820,13 @@ async function askQuestion() {
   box.appendChild(pending);
   box.scrollTop = box.scrollHeight;
   mascotState('thinking');
+  const body = { question: q, conversation_id: paneState[paneId].convId };
+  // detail pane (B) also carries the overview pane (A) context
+  if (paneId === 'B' && paneState.A.convId) {
+    body.context_conversation_id = paneState.A.convId;
+  }
   try {
-    const data = await apiPost(`/repos/${repo}/query`, {question: q, conversation_id: currentConvId});
+    const data = await apiPost(`/repos/${repo}/query`, body);
     const bubble = document.createElement('div');
     bubble.className = 'chat-msg chat-a';
     bubble.innerHTML = renderAnswer(data.answer);
@@ -1243,6 +1309,7 @@ function mascotState(state) {
   });
 })();
 
+initPanes();
 initSidebar();
 loadConversations();
 loadRepos();

@@ -198,10 +198,15 @@ def query_repo(repo_name: str, req: QueryRequest):
     vector_store, ast_index = _load_indexes(repo_name)
     conv_id = req.conversation_id
     history = []
+    # optional shared context (e.g. the "overview" pane feeding the "detail" pane)
+    if req.context_conversation_id:
+        ctx = _history.get(req.context_conversation_id)
+        if ctx:
+            history.extend({"role": m["role"], "content": m["content"]} for m in ctx["messages"][-6:])
     if conv_id:
         conv = _history.get(conv_id)
         if conv:
-            history = [{"role": m["role"], "content": m["content"]} for m in conv["messages"]]
+            history.extend({"role": m["role"], "content": m["content"]} for m in conv["messages"][-6:])
     answer = process_query(req.question, str(repo_path), vector_store, ast_index, _embedder,
                            settings, history=history)
     if conv_id:
