@@ -20,6 +20,8 @@ class Settings:
     history_db: str = field(default_factory=lambda: os.getenv("HISTORY_DB", "./data/history.db"))
     repo_cache_dir: str = field(default_factory=lambda: os.getenv("REPO_CACHE_DIR", "./data/cache"))
     api_token: str = field(default_factory=lambda: os.getenv("API_TOKEN", ""))
+    auth_user: str = field(default_factory=lambda: os.getenv("AUTH_USER", "admin"))
+    auth_password: str = field(default_factory=lambda: os.getenv("AUTH_PASSWORD", ""))
     rate_limit_per_min: int = field(default_factory=lambda: int(os.getenv("RATE_LIMIT_PER_MIN", "60")))
     cors_origins: str = field(default_factory=lambda: os.getenv("CORS_ORIGINS", ""))
     debug: bool = field(default_factory=lambda: os.getenv("DEBUG", "0").lower() in ("1", "true", "yes"))

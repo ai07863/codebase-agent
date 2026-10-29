@@ -176,7 +176,7 @@
 - [x] 告警检查：`scripts/check_alerts.py`（成功率/延迟/降级率/预算）。
 - [x] 成本估算：`LLM_PRICE_*` / `LLM_BUDGET_USD`，trace 记 `cost_est`。
 - [x] 并发/索引缓存：索引复用 + 解析缓存复用 + LRU 上限。
-- [ ] 公网鉴权：**Cloudflare Access（待控制台开启并验证）**。
+- [x] 公网鉴权：**应用内密码（HTTP Basic，`AUTH_USER`/`AUTH_PASSWORD`）已启用并验证**；Cloudflare Access 因需绑卡暂不采用。
 - [ ] 多用户/多租户：**暂缓**（已用 Access 限定本人，当前场景不需要）。
 
 ---

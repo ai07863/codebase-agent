@@ -53,6 +53,7 @@ codebase-agent analyze https://github.com/psf/requests
 | `HISTORY_DB` | 对话历史 SQLite | `./data/history.db` |
 | `REPO_CACHE_DIR` | 解析结果缓存 | `./data/cache` |
 | `API_TOKEN` | 设置后所有 API 需带 `X-API-Token`（默认不鉴权，仅本机） | 空 |
+| `AUTH_USER` / `AUTH_PASSWORD` | 浏览器登录（HTTP Basic）；设置密码后 `/ui` 与 API 都需登录，`/health` 除外 | `admin` / 空 |
 | `RATE_LIMIT_PER_MIN` | 每客户端每分钟昂贵请求上限（`/repos/*`、`/analysis/*`；0=关闭） | `60` |
 | `CORS_ORIGINS` | 允许的跨域来源（逗号分隔） | 本机 |
 | `DEBUG` | `1` 时错误信息回显详情 | `0` |
@@ -117,8 +118,11 @@ docker compose up -d --build     # 应用 + Redis
 ## 公网访问（Cloudflare）
 
 - 隧道：`cloudflared tunnel run image-agent`（`run.cmd` 会自动拉起）。
-- **鉴权**：在 Cloudflare Zero Trust → Access → Applications 为域名加 Self-hosted 应用，
-  策略 Allow → Emails → 你的邮箱，Identity Provider 用 One-time PIN。开启后未登录访问会被拦在边缘。
+- **鉴权（二选一）**：
+  - **应用内密码（推荐，免费、无需绑卡）**：在 `.env` 设 `AUTH_USER`、`AUTH_PASSWORD`，
+    浏览器访问会弹出登录框；`/health` 保持公开供健康检查。未登录 `401` 并返回 `WWW-Authenticate`。
+  - **Cloudflare Access**：Zero Trust → Access → Applications 加 Self-hosted 应用，
+    策略 Allow → Emails → 你的邮箱，IdP 用 One-time PIN（需在 Cloudflare 绑定支付方式）。
 - 限流中间件会优先读取 `CF-Connecting-IP`，隧道后能区分真实客户端。
 
 ## 数据清理

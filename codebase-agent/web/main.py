@@ -1,4 +1,6 @@
+import base64
 import logging
+import secrets
 import shutil
 import subprocess
 import time
@@ -62,18 +64,43 @@ _origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()] or
 app.add_middleware(CORSMiddleware, allow_origins=_origins, allow_methods=["*"], allow_headers=["*"])
 
 
+def _basic_ok(header: str) -> bool:
+    if not header.lower().startswith("basic "):
+        return False
+    try:
+        raw = base64.b64decode(header[6:].strip()).decode("utf-8")
+    except Exception:
+        return False
+    user, _, password = raw.partition(":")
+    return secrets.compare_digest(user, settings.auth_user) and secrets.compare_digest(
+        password, settings.auth_password
+    )
+
+
 @app.middleware("http")
 async def _auth_middleware(request: Request, call_next):
-    token = settings.api_token
     path = request.url.path
-    public = path == "/health" or path.startswith("/ui") or path.startswith("/openapi")
-    if token and not public:
-        provided = request.headers.get("x-api-token") or request.headers.get("authorization", "")
+    if path == "/health":
+        return await call_next(request)
+    token = settings.api_token
+    password = settings.auth_password
+    if not token and not password:
+        return await call_next(request)
+
+    auth = request.headers.get("authorization", "")
+    authorized = password and _basic_ok(auth)
+    if not authorized and token:
+        provided = request.headers.get("x-api-token") or auth
         if provided.lower().startswith("bearer "):
             provided = provided[7:]
-        if provided.strip() != token:
-            return JSONResponse(status_code=401, content={"detail": "未授权：缺少或错误的 API Token"})
-    return await call_next(request)
+        authorized = secrets.compare_digest(provided.strip(), token)
+    if authorized:
+        return await call_next(request)
+    return JSONResponse(
+        status_code=401,
+        content={"detail": "需要登录：请输入用户名和密码"},
+        headers={"WWW-Authenticate": 'Basic realm="codebase-agent", charset="UTF-8"'},
+    )
 
 
 _RATE_WINDOW = 60.0
