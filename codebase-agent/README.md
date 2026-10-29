@@ -97,6 +97,7 @@ python evaluation/benchmark.py fastapi --min-hit-rate 0.6   # 检索回归门槛
 - 接口：`GET /traces`、`GET /metrics/summary?days=7`、`GET /metrics/prometheus`（Prometheus 抓取）。
 - 每条回答下可点 👍/👎，写入 `answer_feedback` 表。
 - 告警检查：`python scripts/check_alerts.py --days 1`（异常返回非零码，可接计划任务）。
+- 影子模式周报：`python scripts/weekly_review.py --days 7`（指标 + 👎 坏例 + 失败/降级 + 最慢 5 条；`--out reports/week.md` 可存文件）。
 
 ## 备份与恢复
 
