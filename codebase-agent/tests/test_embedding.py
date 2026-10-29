@@ -1,6 +1,9 @@
+import pytest
+
 from embedding.embedder import Embedder
 
 
+@pytest.mark.slow
 def test_embedder_returns_float_vectors():
     embedder = Embedder()
     texts = ["hello world", "def foo(): pass"]

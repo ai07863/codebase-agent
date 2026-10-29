@@ -1,8 +1,7 @@
-version: "3.9"
 services:
   app:
     build: .
-    entrypoint: ["uvicorn", "web.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    entrypoint: ["uvicorn", "web.main:app", "--host", "0.0.0.0", "--port", "8000", "--timeout-graceful-shutdown", "5"]
     ports:
       - "8000:8000"
     volumes:
@@ -13,8 +12,7 @@ services:
       - REDIS_PORT=6379
     depends_on:
       - redis
-    stdin_open: true
-    tty: true
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine

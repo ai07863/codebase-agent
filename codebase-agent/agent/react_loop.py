@@ -1,7 +1,11 @@
 import logging
 import re
+import time
 from pathlib import Path
-from openai import OpenAI
+from openai import (
+    OpenAI, APIConnectionError, APITimeoutError, AuthenticationError,
+    PermissionDeniedError, NotFoundError, BadRequestError,
+)
 from config.settings import Settings
 from retrieval.vector_store import VectorStore, SearchResult
 from retrieval.ast_index import ASTIndex
@@ -135,20 +139,44 @@ def _build_messages(query: str, context: str, overview: bool = False,
     return messages
 
 
+_NON_RETRYABLE = (AuthenticationError, PermissionDeniedError, NotFoundError, BadRequestError)
+
+
 def _chat(client: OpenAI, model: str, messages: list[dict],
-          timeout: float = 60, retries: int = 1):
+          timeout: float = 60, retries: int = 2):
     last = None
-    for _ in range(retries + 1):
+    for attempt in range(retries + 1):
         try:
             return client.chat.completions.create(
                 model=model, messages=messages, temperature=0.3, timeout=timeout,
             )
+        except _NON_RETRYABLE:
+            raise
         except Exception as exc:
-            text = str(exc)
-            if "403" in text or "401" in text or "PermissionDenied" in type(exc).__name__:
+            status = getattr(exc, "status_code", None)
+            if status in (400, 401, 403, 404):
                 raise
             last = exc
+            if attempt < retries:
+                delay = min(8.0, 0.5 * (2 ** attempt))
+                logger.warning(
+                    "LLM call failed (attempt %d/%d): %s; retry in %.1fs",
+                    attempt + 1, retries + 1, exc, delay,
+                )
+                time.sleep(delay)
     raise last
+
+
+def _fallback_answer(results: list[SearchResult], exc: Exception) -> str:
+    lines = [f"- `{r.file_path}:{r.start_line}` — {r.name}" for r in results[:5]]
+    body = "\n".join(lines) if lines else "（未检索到相关代码）"
+    hint = ""
+    if isinstance(exc, (AuthenticationError, PermissionDeniedError)):
+        hint = "\n\n提示：请检查 LLM_API_KEY 与模型权限配置。"
+    return (
+        "⚠️ 模型服务暂时不可用，已为你返回最相关的代码位置，可直接查看：\n\n"
+        f"{body}\n\n（错误：{type(exc).__name__}）{hint}"
+    )
 
 
 def _open_cache(settings: Settings) -> Cache | None:
@@ -179,7 +207,9 @@ def _cache_set(cache: Cache | None, key: str, value: str, ttl: int = 86400) -> N
 def process_query(query: str, repo_path: str, vector_store: VectorStore,
                   ast_index: ASTIndex, embedder: Embedder, settings: Settings,
                   history: list[dict] | None = None,
-                  recall: list[dict] | None = None) -> str:
+                  recall: list[dict] | None = None,
+                  trace: dict | None = None) -> str:
+    trace = trace if trace is not None else {}
     repo_name = repo_path.rstrip("/\\").split("/")[-1].split("\\")[-1]
     cache_key = f"qa:v2:{repo_name}:{query}"
 
@@ -187,6 +217,7 @@ def process_query(query: str, repo_path: str, vector_store: VectorStore,
     try:
         cached = _cache_get(cache, cache_key)
         if cached:
+            trace.update({"cached": True, "answer_len": len(cached)})
             return cached
 
         client = OpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url)
@@ -203,13 +234,47 @@ def process_query(query: str, repo_path: str, vector_store: VectorStore,
             [(r.name, r.file_path, round(r.score, 3)) for r in results],
             len(context),
         )
+        trace.update({
+            "route": route,
+            "overview": overview,
+            "retrieved": [{"name": r.name, "file": r.file_path, "score": round(r.score, 3)} for r in results],
+            "context_chars": len(context),
+            "context_tokens_est": len(context) // 4,
+            "llm_model": settings.llm_model,
+            "cached": False,
+        })
 
         messages = _build_messages(query, context, overview, history, recall)
 
-        response = _chat(client, settings.llm_model, messages)
+        started = time.perf_counter()
+        degraded = False
+        try:
+            response = _chat(
+                client, settings.llm_model, messages,
+                timeout=settings.llm_timeout, retries=settings.llm_retries,
+            )
+            answer = response.choices[0].message.content or ""
+            trace["llm_ok"] = True
+        except Exception as exc:
+            degraded = True
+            trace["llm_ok"] = False
+            trace["llm_error"] = f"{type(exc).__name__}: {exc}"[:200]
+            trace["fallback"] = True
+            logger.error("LLM failed, degrading to retrieval list: %s", exc)
+            answer = _fallback_answer(results, exc)
+        finally:
+            trace["llm_latency_ms"] = int((time.perf_counter() - started) * 1000)
 
-        answer = response.choices[0].message.content or ""
-        _cache_set(cache, cache_key, answer)
+        trace["answer_len"] = len(answer)
+        input_tokens = trace.get("context_tokens_est") or 0
+        output_tokens = len(answer) // 4
+        trace["cost_est"] = round(
+            input_tokens / 1000 * settings.llm_price_input_per_1k
+            + output_tokens / 1000 * settings.llm_price_output_per_1k,
+            6,
+        )
+        if not degraded:
+            _cache_set(cache, cache_key, answer)
         return answer
     finally:
         if cache is not None:

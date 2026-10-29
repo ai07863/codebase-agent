@@ -1,3 +1,5 @@
+import pytest
+
 from retrieval.vector_store import VectorStore, SearchResult, _node_text, _chunk_text
 from retrieval.ast_index import ASTIndex
 from retrieval.bm25_index import BM25Index
@@ -22,6 +24,7 @@ class _OneHitVectorStore:
                              start_line=1, end_line=2, score=0.1)]
 
 
+@pytest.mark.slow
 def test_vector_store_add_and_search():
     nodes = [
         CodeNode(node_id="a", type="function", name="greet", file_path="test.py",

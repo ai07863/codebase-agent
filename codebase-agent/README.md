@@ -44,11 +44,16 @@ codebase-agent analyze https://github.com/psf/requests
 | `LLM_API_KEY` | LLM 密钥 | 空 |
 | `LLM_MODEL` | 模型名 | `gpt-4o-mini` |
 | `LLM_BASE_URL` | OpenAI 兼容地址 | `https://api.openai.com/v1` |
+| `LLM_TIMEOUT` | LLM 请求超时（秒） | `60` |
+| `LLM_RETRIES` | 失败重试次数（401/403/404 不重试，失败会降级返回命中位置） | `2` |
+| `LLM_PRICE_INPUT_PER_1K` / `LLM_PRICE_OUTPUT_PER_1K` | 每千 token 单价（估算成本用，0=不计） | `0` |
+| `LLM_BUDGET_USD` | 预算（美元，超预算时 `check_alerts.py` 告警；0=不启用） | `0` |
 | `EMBEDDING_MODEL` | 向量模型 | `BAAI/bge-small-zh-v1.5` |
 | `REDIS_HOST` / `REDIS_PORT` | 问答缓存（可选，不可用会自动降级） | `localhost` / `6379` |
 | `HISTORY_DB` | 对话历史 SQLite | `./data/history.db` |
 | `REPO_CACHE_DIR` | 解析结果缓存 | `./data/cache` |
 | `API_TOKEN` | 设置后所有 API 需带 `X-API-Token`（默认不鉴权，仅本机） | 空 |
+| `RATE_LIMIT_PER_MIN` | 每客户端每分钟昂贵请求上限（`/repos/*`、`/analysis/*`；0=关闭） | `60` |
 | `CORS_ORIGINS` | 允许的跨域来源（逗号分隔） | 本机 |
 | `DEBUG` | `1` 时错误信息回显详情 | `0` |
 
@@ -79,8 +84,42 @@ codebase-agent/
 
 ```bash
 pip install -e ".[dev]"
-pytest
+pytest                 # 全部（含会下载 embedding 模型的 slow 测试）
+pytest -m "not slow"   # 快速测试（CI 使用）
+python evaluation/benchmark.py fastapi --min-hit-rate 0.6   # 检索回归门槛
 ```
+
+## 指标与反馈
+
+- 每次问答都会记录一条 trace（路由、召回命中、上下文字符/token、LLM 耗时与错误、是否缓存）。
+- 页面顶部 **📊 指标**：最近 7 天成功率、缓存命中率、延迟 P50/P95、👍/👎 好评率。
+- 接口：`GET /traces`、`GET /metrics/summary?days=7`、`GET /metrics/prometheus`（Prometheus 抓取）。
+- 每条回答下可点 👍/👎，写入 `answer_feedback` 表。
+- 告警检查：`python scripts/check_alerts.py --days 1`（异常返回非零码，可接计划任务）。
+
+## 备份与恢复
+
+```bash
+python scripts/backup.py                        # 备份到 data/backups/<时间戳>/
+python scripts/backup.py --keep 7               # 只保留最近 7 份
+python scripts/backup.py --restore data/backups/<时间戳>   # 先停服务再恢复
+```
+
+`history.db` 用 SQLite 在线备份（运行中安全）；`chroma` 目录建议空闲时备份。
+
+## 部署（Docker）
+
+```bash
+docker compose up -d --build     # 应用 + Redis
+# 应用: http://127.0.0.1:8000/ui/
+```
+
+## 公网访问（Cloudflare）
+
+- 隧道：`cloudflared tunnel run image-agent`（`run.cmd` 会自动拉起）。
+- **鉴权**：在 Cloudflare Zero Trust → Access → Applications 为域名加 Self-hosted 应用，
+  策略 Allow → Emails → 你的邮箱，Identity Provider 用 One-time PIN。开启后未登录访问会被拦在边缘。
+- 限流中间件会优先读取 `CF-Connecting-IP`，隧道后能区分真实客户端。
 
 ## 数据清理
 

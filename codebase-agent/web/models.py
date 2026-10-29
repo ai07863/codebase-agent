@@ -24,6 +24,14 @@ class QueryResponse(BaseModel):
     conversation_id: str | None = None
 
 
+class FeedbackRequest(BaseModel):
+    repo: str | None = None
+    conversation_id: str | None = None
+    question: str = ""
+    rating: int
+    comment: str | None = None
+
+
 class Message(BaseModel):
     role: str
     content: str

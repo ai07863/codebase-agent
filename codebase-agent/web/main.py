@@ -1,6 +1,7 @@
 import logging
 import shutil
 import subprocess
+import time
 import traceback
 from pathlib import Path
 from threading import Lock
@@ -8,7 +9,7 @@ from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from config.settings import Settings
 from code_parser.ast_parser import parse_repo
@@ -22,6 +23,7 @@ from agent.react_loop import process_query
 from web.models import (
     AnalyzeRequest, AnalyzeResponse, QueryRequest, QueryResponse, RepoInfo,
     PRRequest, PRResponse, FileView, Conversation, ConversationInfo, CreateConversationRequest,
+    FeedbackRequest,
 )
 from web.files import resolve_repo_file, slice_lines
 from web.store import ConversationStore
@@ -74,6 +76,42 @@ async def _auth_middleware(request: Request, call_next):
     return await call_next(request)
 
 
+_RATE_WINDOW = 60.0
+_rate_hits: dict[str, list[float]] = {}
+_rate_lock = Lock()
+
+
+def _client_key(request: Request) -> str:
+    return request.headers.get("cf-connecting-ip") or (
+        request.client.host if request.client else "unknown"
+    )
+
+
+def _rate_limited(key: str) -> bool:
+    limit = settings.rate_limit_per_min
+    if limit <= 0:
+        return False
+    now = time.time()
+    with _rate_lock:
+        hits = _rate_hits.setdefault(key, [])
+        cutoff = now - _RATE_WINDOW
+        hits[:] = [t for t in hits if t > cutoff]
+        if len(hits) >= limit:
+            return True
+        hits.append(now)
+    return False
+
+
+@app.middleware("http")
+async def _rate_limit_middleware(request: Request, call_next):
+    expensive = request.method == "POST" and (
+        request.url.path.startswith("/repos/") or request.url.path.startswith("/analysis/")
+    )
+    if expensive and _rate_limited(_client_key(request)):
+        return JSONResponse(status_code=429, content={"detail": "请求过于频繁，请稍后再试"})
+    return await call_next(request)
+
+
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     logger.error("未处理异常 %s %s：%s\n%s", request.method, request.url.path, exc, traceback.format_exc())
@@ -104,9 +142,20 @@ def _load_nodes_and_index(repo_name: str) -> tuple[list, VectorStore, ASTIndex]:
     return nodes, vector_store, ast_index
 
 
+_MAX_CACHED_REPOS = 6
+
+
+def _evict_locked() -> None:
+    while len(_indexes) > _MAX_CACHED_REPOS:
+        oldest = next(iter(_indexes))
+        _indexes.pop(oldest, None)
+        _cache.pop(oldest, None)
+
+
 def _load_indexes(repo_name: str):
     with _index_lock:
         if repo_name in _indexes:
+            _indexes[repo_name] = _indexes.pop(repo_name)
             return _indexes[repo_name]
         cached = _cache.get(repo_name)
     # Reuse nodes already parsed for the graph; only embed once, outside the lock.
@@ -123,6 +172,7 @@ def _load_indexes(repo_name: str):
     with _index_lock:
         _indexes.setdefault(repo_name, (vector_store, ast_index))
         _cache.setdefault(repo_name, (nodes, graph))
+        _evict_locked()
         return _indexes[repo_name]
 
 
@@ -140,6 +190,7 @@ def _store_index(repo_name: str, nodes: list, vector_store: VectorStore, ast_ind
     with _index_lock:
         _indexes[repo_name] = (vector_store, ast_index)
         _cache[repo_name] = (nodes, build_call_graph(nodes))
+        _evict_locked()
 
 
 @app.get("/health")
@@ -227,8 +278,20 @@ def query_repo(repo_name: str, req: QueryRequest):
                 logger.warning("chat recall failed: %s", exc)
         recall = recall[:5]
 
-    answer = process_query(req.question, str(repo_path), vector_store, ast_index, _embedder,
-                           settings, history=history, recall=recall)
+    trace = {
+        "repo": repo_name,
+        "conversation_id": conv_id,
+        "context_conversation_id": req.context_conversation_id,
+        "question": req.question,
+    }
+    try:
+        answer = process_query(req.question, str(repo_path), vector_store, ast_index, _embedder,
+                               settings, history=history, recall=recall, trace=trace)
+    finally:
+        try:
+            _history.add_trace(trace)
+        except Exception as exc:
+            logger.warning("trace store failed: %s", exc)
     if conv_id:
         for role, text in (("user", req.question), ("assistant", answer)):
             mid = _history.add_message(conv_id, role, text)
@@ -243,6 +306,57 @@ def query_repo(repo_name: str, req: QueryRequest):
 @app.get("/conversations", response_model=list[ConversationInfo])
 def list_conversations():
     return _history.list()
+
+
+@app.get("/traces")
+def list_traces(limit: int = 50):
+    return _history.recent_traces(limit)
+
+
+@app.post("/feedback")
+def submit_feedback(fb: FeedbackRequest):
+    if fb.rating not in (-1, 1):
+        raise HTTPException(status_code=400, detail="rating must be 1 or -1")
+    _history.add_feedback(fb.model_dump())
+    return {"ok": True}
+
+
+@app.get("/metrics/summary")
+def metrics_summary(days: int = 7):
+    m = _history.metrics_summary(days)
+    budget = settings.llm_budget_usd
+    m["budget_usd"] = budget
+    m["budget_used_pct"] = round(m["cost_total"] / budget, 4) if budget > 0 else None
+    return m
+
+
+@app.get("/metrics/prometheus", response_class=PlainTextResponse)
+def metrics_prometheus(days: int = 7):
+    m = _history.metrics_summary(days)
+    budget = settings.llm_budget_usd
+    m["budget_used_pct"] = round(m["cost_total"] / budget, 4) if budget > 0 else None
+    gauges = {
+        "cba_queries_total": m["queries"],
+        "cba_cached_total": m["cached"],
+        "cba_llm_errors_total": m["llm_errors"],
+        "cba_success_rate": m["success_rate"],
+        "cba_cache_rate": m["cache_rate"],
+        "cba_latency_p50_ms": m["latency_p50_ms"],
+        "cba_latency_p95_ms": m["latency_p95_ms"],
+        "cba_feedback_up": m["feedback_up"],
+        "cba_feedback_down": m["feedback_down"],
+        "cba_feedback_good_rate": m["feedback_good_rate"],
+        "cba_cost_total": m["cost_total"],
+        "cba_budget_used_pct": m["budget_used_pct"],
+        "cba_fallbacks_total": m["fallbacks"],
+    }
+    lines = []
+    for name, value in gauges.items():
+        if value is None:
+            continue
+        lines.append(f"# TYPE {name} gauge")
+        lines.append(f"{name} {value}")
+    return "\n".join(lines) + "\n"
 
 
 @app.post("/conversations", response_model=Conversation)
